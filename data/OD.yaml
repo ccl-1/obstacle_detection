@@ -1,0 +1,41 @@
+# YOLOv5 🚀 by Ultralytics, AGPL-3.0 license
+# COCO128 dataset https://www.kaggle.com/ultralytics/coco128 (first 128 images from COCO train2017) by Ultralytics
+# Example usage: python train.py --data coco128.yaml
+# parent
+# ├── yolov5
+# └── datasets
+#     └── coco128  ← downloads here (7 MB)
+
+# Train/val/test sets as 1) dir: path/to/imgs, 2) file: path/to/imgs.txt, or 3) list: [path/to/imgs1, path/to/imgs2, ..]
+path: /media/ubuntu/zoro/ubuntu/data/ObstacleDetection # dataset root dir
+train: images/train # train images (relative to 'path') 128 images
+val: images/val # val images (relative to 'path') 128 images
+
+# Classes
+names:
+  0: Fallen Trees
+  1: Stone
+  2: animals
+  3: bird
+  4: boulders
+  5: broken tracks
+  6: buffalo
+  7: car
+  8: cow
+  9: deer
+  10: dog
+  11: elephant
+  12: flood
+  13: goat
+  14: human
+  15: landslide
+  16: lion
+  17: monkey
+  18: obstacle
+  19: peacock
+  20: pig
+  21: rock
+  22: sheep
+  23: tiger
+  24: trash
+  25: truck

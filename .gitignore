@@ -1,0 +1,4 @@
+runs/
+scripts/
+yolov5s-seg.pt
+yolov5s.pt
