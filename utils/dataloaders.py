@@ -551,6 +551,7 @@ class LoadImagesAndLabels(Dataset):
         prefix="",
         rank=-1,
         seed=0,
+        label_mapping=None,
     ):
         self.img_size = img_size
         self.augment = augment

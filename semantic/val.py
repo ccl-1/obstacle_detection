@@ -81,6 +81,11 @@ all_stuff_ids = [1,
     0, # unlabeled
 ]
 
+
+label_mapping_obstacle = {0: 0, 215: 1} # ignore_label=-1,   for obstacle
+label_mapping_bdd100k = {0: 0, 255:1, 127:2} # ignore_label=-1,    for bdd 100k  0, 127, 255
+label_mapping_coco128 = None
+
 def getDataIds(name = 'semantic'):
     if 'semantic' == name:
         return  all_stuff_ids
@@ -180,6 +185,7 @@ def run(
     exist_ok=False,  # existing project/name ok, do not increment
     half=True,  # use FP16 half-precision inference
     dnn=False,  # use OpenCV DNN for ONNX inference
+    label_mapping = None,
     model=None,
     dataloader=None,
     save_dir=Path(""),
@@ -189,6 +195,12 @@ def run(
     compute_loss=None,
     callbacks=Callbacks(),
 ):
+    if label_mapping == 'bdd100k':
+        label_mapping = label_mapping_bdd100k
+    elif label_mapping == 'coco128':
+        label_mapping = label_mapping_coco128
+    else: # label_map == 'obstacle':
+        label_mapping = label_mapping_obstacle
 
     # Initialize/load model and set device
     training = model is not None
@@ -257,6 +269,7 @@ def run(
             prefix=colorstr(f"{task}: "),
             overlap_mask=overlap,
             mask_downsample_ratio=mask_downsample_ratio,
+            label_mapping=label_mapping,
         )[0]
 
     seen = 0
@@ -280,6 +293,7 @@ def run(
     jdict, stats = [], []
     pbar = tqdm(dataloader, desc=s, bar_format=TQDM_BAR_FORMAT)  # progress bar # logger title head here  ... 
     for batch_i, (im, targets, gt_masks, paths, shapes) in enumerate(pbar):
+        
         with dt[0]:
             if cuda:
                 im = im.to(device, non_blocking=True)
@@ -502,6 +516,7 @@ def parse_opt():
     parser.add_argument("--exist-ok", action="store_true", help="existing project/name ok, do not increment")
     parser.add_argument("--half", action="store_true", help="use FP16 half-precision inference")
     parser.add_argument("--dnn", action="store_true", help="use OpenCV DNN for ONNX inference")
+    parser.add_argument("--label_map", type=str, default="obstacle", help="dataset.yaml path")
     opt = parser.parse_args()
     opt.data = check_yaml(opt.data)  # check YAML
     # opt.save_json |= opt.data.endswith('coco.yaml')

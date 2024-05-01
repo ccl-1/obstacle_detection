@@ -98,6 +98,16 @@ WORLD_SIZE = int(os.getenv("WORLD_SIZE", 1))
 GIT_INFO = check_git_info()
 
 
+
+label_mapping_obstacle = {0: 0, 215: 1} # ignore_label=-1,   for obstacle
+label_mapping_bdd100k = {0: 0, 255:1, 127:2} # ignore_label=-1,    for bdd 100k  0, 127, 255
+label_mapping_coco128 = None
+# [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 14, 15, 16, 17, 18, 21, 22, 23, 
+#  24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 39, 40, 41, 42, 
+#  43, 44, 45, 46, 47, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 
+#  62, 63, 64, 65, 66, 68, 69, 70, 72, 73, 74, 75, 76, 77, 78, 80]
+
+
 def train(hyp, opt, device, callbacks):
     """
     Trains the YOLOv5 model on a dataset, managing hyperparameters, model optimization, logging, and validation.
@@ -119,6 +129,8 @@ def train(hyp, opt, device, callbacks):
         workers,
         freeze,
         mask_ratio,
+        label_map,
+        train_mode
     ) = (
         Path(opt.save_dir),
         opt.epochs,
@@ -134,8 +146,18 @@ def train(hyp, opt, device, callbacks):
         opt.workers,
         opt.freeze,
         opt.mask_ratio,
+        opt.label_map,
+        opt.train_mode
     )
     # callbacks.run('on_pretrain_routine_start')
+
+    if label_map == 'bdd100k':
+        label_mapping = label_mapping_bdd100k
+    elif label_map == 'coco128':
+        label_mapping = label_mapping_coco128
+    else: # label_map == 'obstacle':
+        label_mapping = label_mapping_obstacle
+
 
     # Directories
     w = save_dir / "weights"  # weights dir
@@ -188,7 +210,7 @@ def train(hyp, opt, device, callbacks):
         model = DetectionSemanticModel(cfg, ch=3, nc=nc, anchors=hyp.get("anchors")).to(device)  # create
     amp = check_amp(model)  # check AMP
 
-    # Freeze
+    # Freeze ----------------------------------------------------------------------------------------------
     freeze = [f"model.{x}." for x in (freeze if len(freeze) > 1 else range(freeze[0]))]  # layers to freeze
     for k, v in model.named_parameters():
         v.requires_grad = True  # train all layers
@@ -196,6 +218,19 @@ def train(hyp, opt, device, callbacks):
         if any(x in k for x in freeze):
             LOGGER.info(f"freezing {k}")
             v.requires_grad = False
+
+        if train_mode == 'det_only': 
+            freeze_seg_idx = [24,]
+            if any(str(x) in k for x in freeze_seg_idx):
+                LOGGER.info(f"freezing segmentation head {k}")
+                v.requires_grad = False
+
+        if train_mode == 'seg_only':
+            freeze_seg_idx = [25,]
+            if any(str(x) in k for x in freeze_seg_idx):
+                LOGGER.info(f"freezing detection head {k}")
+                v.requires_grad = False
+
 
     # Image size
     gs = max(int(model.stride.max()), 32)  # grid size (max stride)
@@ -262,6 +297,7 @@ def train(hyp, opt, device, callbacks):
         shuffle=True,
         mask_downsample_ratio=mask_ratio,
         overlap_mask=overlap,
+        label_mapping=label_mapping,
     )
     labels = np.concatenate(dataset.labels, 0)
     mlc = int(labels[:, 0].max())  # max label class
@@ -284,6 +320,7 @@ def train(hyp, opt, device, callbacks):
             mask_downsample_ratio=mask_ratio,
             overlap_mask=overlap,
             prefix=colorstr("val: "),
+            label_mapping=label_mapping,
         )[0]
 
         if not resume:
@@ -357,10 +394,6 @@ def train(hyp, opt, device, callbacks):
         optimizer.zero_grad()
         torch.use_deterministic_algorithms(mode=True, warn_only=True)
         for i, (imgs, targets, masks, paths, _) in pbar: # batch ------------------------------------------------------
-            # print(imgs.shape) # torch.Size([16, 3, 640, 640])
-            # print(targets.shape) # torch.Size([60, 6])
-            # print(masks.shape) # torch.Size([16, 640, 640])
-
             # callbacks.run('on_train_batch_start')
             ni = i + nb * epoch  # number integrated batches (since train start)
             imgs = imgs.to(device, non_blocking=True).float() / 255  # uint8 to float32, 0-255 to 0.0-1.0
@@ -456,6 +489,7 @@ def train(hyp, opt, device, callbacks):
                     compute_loss=compute_loss,
                     mask_downsample_ratio=mask_ratio,
                     overlap=overlap,
+                    label_mapping = label_mapping, 
                 )
 
             # Update best mAP
@@ -561,7 +595,9 @@ def parse_opt(known=False):
     parser.add_argument("--weights", type=str, default=ROOT / "yolov5s-seg.pt", help="initial weights path")
     parser.add_argument("--cfg", type=str, default="models/semantic/yolov5s-seg.yaml", help="model.yaml path")
     parser.add_argument("--data", type=str, default="data/obstacle.yaml", help="dataset.yaml path")
+    parser.add_argument("--label_map", type=str, default="obstacle", help="dataset.yaml path")
     # parser.add_argument("--data", type=str, default="data/bdd100k-seg.yaml", help="dataset.yaml path")
+    parser.add_argument("--train_mode", type=str, default="None", help="det_only, seg_only")
 
 
     parser.add_argument("--hyp", type=str, default=ROOT / "data/hyps/hyp.scratch-low.yaml", help="hyperparameters path")

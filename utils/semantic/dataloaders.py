@@ -66,6 +66,7 @@ def create_dataloader(
     mask_downsample_ratio=1,
     overlap_mask=False,
     seed=0,
+    label_mapping=None,
 ):
     if rect and shuffle:
         LOGGER.warning("WARNING ⚠️ --rect is incompatible with DataLoader shuffle, setting shuffle=False")
@@ -87,6 +88,7 @@ def create_dataloader(
             downsample_ratio=mask_downsample_ratio,
             overlap=overlap_mask,
             rank=rank,
+            label_mapping=label_mapping,
         )
 
     batch_size = min(batch_size, len(dataset))
@@ -249,14 +251,17 @@ class LoadImagesAndSemanticLabels(Dataset):  # for training/testing
 
     def convert_label(self, label, inverse=False):
         # label is mask, set the original key in mask to value
-        temp = label.copy()
-        if inverse:
-            for v, k in self.label_mapping.items(): # return (key, value), Todo key -> value
-                label[temp == k] = v
+        if self.label_mapping is not None:
+            temp = label.copy()
+            if inverse:
+                for v, k in self.label_mapping.items(): # return (key, value), Todo key -> value
+                    label[temp == k] = v
+            else:
+                for k, v in self.label_mapping.items(): # key <- value
+                    label[temp == k] = v
+            return label
         else:
-            for k, v in self.label_mapping.items(): # key <- value
-                label[temp == k] = v
-        return label
+            return label
     
     def load_mosaic(self, index):
         # YOLOv5 4-mosaic loader. Loads 1 image + 3 random images into a 4-image mosaic
@@ -359,16 +364,19 @@ class LoadImagesAndLabelsAndMasks(LoadImagesAndLabels):  # for training/testing
     cache_version = 0.6
     def __init__(self, path, img_size=640, batch_size=16, augment=False, 
                  hyp=None, rect=False, image_weights=False, cache_images=False, single_cls=False, 
-                 stride=32, pad=0, min_items=0, prefix="", downsample_ratio=1, overlap=False, rank=-1, seed=0,
+                 stride=32, pad=0, min_items=0, prefix="", downsample_ratio=1, overlap=False, rank=-1, seed=0, label_mapping=None,
     ):
         super().__init__(path, img_size, batch_size, augment, hyp, rect, 
-                         image_weights, cache_images, single_cls, stride, pad, min_items, prefix, rank, seed)
+                         image_weights, cache_images, single_cls, stride, pad, min_items, prefix, rank, seed, label_mapping)
         self.downsample_ratio = downsample_ratio
         self.overlap = overlap
-        # self.label_mapping = {0: 0, 215: 1} # ignore_label=-1,   for obstacle
-        self.label_mapping = {0: 0, 255:1, 127:2} # ignore_label=-1,    for bdd 100k  0, 127, 255
-        self.label_mapping = {0: 0, 255:1, 127:2, 215:1} # ignore_label=-1,    for bdd 100k  0, 127, 255
+        self.label_mapping = label_mapping 
+        # # self.label_mapping = {0: 0, 215: 1} # ignore_label=-1,   for obstacle
+        # self.label_mapping = {0: 0, 255:1, 127:2} # ignore_label=-1,    for bdd 100k  0, 127, 255
+        # self.label_mapping = {0: 0, 255:1, 127:2} # ignore_label=-1,    for bdd 100k  0, 127, 255
 
+
+ 
 
         # self.class_weights = torch.FloatTensor([0.8373, 0.918]).cuda()
         
@@ -428,8 +436,8 @@ class LoadImagesAndLabelsAndMasks(LoadImagesAndLabels):  # for training/testing
                 self.semantic_label_files.pop(idx)
                 self.labels.pop(idx)  # 缺少得全黑表示 .. .
 
-        # print(len(self.im_files), len(self.labels), len(self.semantic_label_files)) # 70 66
         self.indices = range(len(self.im_files))
+  
 
 
     def __len__(self):
@@ -500,22 +508,24 @@ class LoadImagesAndLabelsAndMasks(LoadImagesAndLabels):  # for training/testing
         # Convert
         img = img.transpose((2, 0, 1))[::-1]  # HWC to CHW, BGR to RGB
         img = np.ascontiguousarray(img) # 将一个内存不连续存储的数组转换为内存连续存储的数组 shape (3, 640, 640)
-        
-        # semantic_labels = self.convert_label(semantic_labels) # 如果需要进行标签映射的话 ... 
         semantic_labels = np.ascontiguousarray(semantic_labels) # shape: (640, 640))
+        
         return torch.from_numpy(img), labels_out, torch.from_numpy(semantic_labels), self.im_files[index], shapes
 
 
     def convert_label(self, label, inverse=False):
         # label is mask, set the original key in mask to value
-        temp = label.copy()
-        if inverse:
-            for v, k in self.label_mapping.items(): # return (key, value), Todo key -> value
-                label[temp == k] = v
+        if self.label_mapping is None:
+            return label
         else:
-            for k, v in self.label_mapping.items(): # key <- value
-                label[temp == k] = v
-        return label
+            temp = label.copy()
+            if inverse:
+                for v, k in self.label_mapping.items(): # return (key, value), Todo key -> value
+                    label[temp == k] = v
+            else:
+                for k, v in self.label_mapping.items(): # key <- value
+                    label[temp == k] = v
+            return label
     
     def load_mosaic(self, index):
         # YOLO 4-mosaic loader. Loads 1 image + 3 random images into a 4-image mosaic
@@ -552,11 +562,9 @@ class LoadImagesAndLabelsAndMasks(LoadImagesAndLabels):  # for training/testing
             padw = x1a - x1b
             padh = y1a - y1b
 
-            # 在新图中更新坐标值
             labels = self.labels[index].copy()
             if labels.size:
                 labels[:, 1:] = xywhn2xyxy(labels[:, 1:], w, h, padw, padh)  # normalized xywh to pixel xyxy format
-
             labels4.append(labels)
 
         # Concat/clip labels
@@ -601,7 +609,7 @@ class LoadImagesAndLabelsAndMasks(LoadImagesAndLabels):  # for training/testing
             im = cv2.resize(im, (int(w0 * r), int(h0 * r)),
                             interpolation=cv2.INTER_AREA if r < 1 and not self.augment else cv2.INTER_LINEAR)
             semantic_labels = cv2.resize(semantic_labels, (int(w0 * r), int(h0 * r)), interpolation=cv2.INTER_NEAREST) 
-        semantic_labels = self.convert_label(semantic_labels) # 如果需要进行标签映射的话 ...
+        semantic_labels = self.convert_label(semantic_labels) 
         return im, semantic_labels, (h0, w0), im.shape[:2]  # im, hw_original, hw_resized
 
 
@@ -646,6 +654,8 @@ if __name__ == "__main__":
     
     # Dataset只负责数据的抽取，调用一次__getitem__()只返回一个样本。如果希望批处理，还要同时进行shuffle和并行加速等操作，就需要使用DataLoader。
     data_path = '/media/ym-004/9AC2F49AC2F47BB7/zoro/data/ObstacleDetection/images/val'
+    data_path = '/media/ym-004/9AC2F49AC2F47BB7/zoro/data/ObstacleDetection/images/val'
+
 
     # data_path = '/media/ym-004/9AC2F49AC2F47BB7/zoro/data/bdd100k/For_OD/images/train'
 
