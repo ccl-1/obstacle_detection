@@ -78,7 +78,6 @@ def plot_images_and_masks(images, targets, semasks, nc_seg, paths=None, fname="i
                 mask = image_masks.astype(np.uint8)
                 mask = cv2.resize(mask, (w, h))
 
-            print(torch.unique(torch.tensor(mask)), "----------------")
             for idx in range(1, nc_seg):
                 colored_mask = np.zeros((h,w, 3))
                 colored_mask[mask== idx] = color[idx-1]
