@@ -80,7 +80,8 @@ class UConv(nn.Module):
 
     def forward(self, x):
         return self.up(self.cv2(self.cv1(x)))
-    
+
+
 class SegMaskBase(nn.Module):
     def __init__(self, n_segcls=2, n=1, c_hid=256, shortcut=False, ch=()):  # n是C3的, c_hid是C3的输出通道数
         super(SegMaskBase, self).__init__()
@@ -97,7 +98,6 @@ class SegMaskBase(nn.Module):
                                # (shape: (batch_size, num_classes, h/16, w/16))
                                # 上采样恢复到原始 GT尺寸， 方便 计算loss    
                                nn.Upsample(scale_factor=8, mode='bilinear', align_corners=True), )        
-
     def forward(self, x):
         return self.m(x[0])  
 

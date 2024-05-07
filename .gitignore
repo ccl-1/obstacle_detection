@@ -2,3 +2,7 @@ runs/
 scripts/
 yolov5s-seg.pt
 yolov5s.pt
+
+models/__pycache__
+
+*.pyc

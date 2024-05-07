@@ -122,11 +122,12 @@ def random_perspective(
     if (border[0] != 0) or (border[1] != 0) or (M != np.eye(3)).any():  # image changed
         if perspective:
             im = cv2.warpPerspective(im, M, dsize=(width, height), borderValue=(114, 114, 114))
-            semantic_masks = cv2.warpPerspective(semantic_masks, M, dsize=(width, height), borderValue=0)
+            semantic_masks = cv2.warpPerspective(semantic_masks, M, dsize=(width, height), borderValue=0, flags=cv2.INTER_NEAREST)
+            # 必须选用 flags=cv2.INTER_NEAREST
 
         else:  # affine
             im = cv2.warpAffine(im, M[:2], dsize=(width, height), borderValue=(114, 114, 114))
-            semantic_masks = cv2.warpAffine(semantic_masks, M[:2], dsize=(width, height), borderValue=0)
+            semantic_masks = cv2.warpAffine(semantic_masks, M[:2], dsize=(width, height), borderValue=0,flags=cv2.INTER_NEAREST)
 
 
     # Visualize

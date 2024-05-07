@@ -55,6 +55,7 @@ from utils.general import (
     check_requirements,
     check_yaml,
     coco80_to_coco91_class,
+    bdd100k_10_to_5_class,
     colorstr,
     increment_path,
     non_max_suppression,
@@ -194,13 +195,14 @@ def run(
     mask_downsample_ratio=1,
     compute_loss=None,
     callbacks=Callbacks(),
+    use_bdd100k_5 = True
 ):
     if label_mapping == 'bdd100k':
-        label_mapping = label_mapping_bdd100k
+        label_map = label_mapping_bdd100k
     elif label_mapping == 'coco128':
-        label_mapping = label_mapping_coco128
+        label_map = label_mapping_coco128
     else: # label_map == 'obstacle':
-        label_mapping = label_mapping_obstacle
+        label_map = label_mapping_obstacle
 
     # Initialize/load model and set device
     training = model is not None
@@ -269,7 +271,7 @@ def run(
             prefix=colorstr(f"{task}: "),
             overlap_mask=overlap,
             mask_downsample_ratio=mask_downsample_ratio,
-            label_mapping=label_mapping,
+            label_mapping=label_map,
         )[0]
 
     seen = 0
@@ -277,13 +279,16 @@ def run(
     names = model.names if hasattr(model, "names") else model.module.names  # get class names
     if isinstance(names, (list, tuple)):  # old format
         names = dict(enumerate(names))
-    class_map = coco80_to_coco91_class() if is_coco else list(range(1000))
+    # class_map = coco80_to_coco91_class() if is_coco else list(range(1000))
+    class_map = bdd100k_10_to_5_class()  if use_bdd100k_5  else list(range(1000))
     s = ("%22s" + "%11s" * 6) % ("Class", "Images", "Instances", "Box(P", "R", "mAP50", "mAP50-95)",)
 
     dt = Profile(device=device), Profile(device=device), Profile(device=device)
+
     metrics = Metrics()
-    acc_seg = AverageMeter()
-    meanAcc_seg = AverageMeter()
+    cpa_seg = AverageMeter()
+    pa_seg = AverageMeter()
+    mpa_seg = AverageMeter()
     IoU_seg = AverageMeter()
     mIoU_seg = AverageMeter()
     FWIoU_seg = AverageMeter()
@@ -323,10 +328,11 @@ def run(
 
         # Metrics
         semantic_metrics = Semantic_Metrics(nc = seg_nc)
-        acc, meanAcc, IoU, mIoU, FWIoU = semantic_metrics.update(pred_masks, gt_masks)
+        cpa, pa, mpa, IoU, mIoU, FWIoU = semantic_metrics.update(pred_masks, gt_masks)
         batch = pred_masks.size()[0]
-        acc_seg.update(acc, batch)
-        meanAcc_seg.update(meanAcc, batch)
+        cpa_seg.update(cpa, batch)
+        pa_seg.update(pa, batch)
+        mpa_seg.update(mpa, batch)
         IoU_seg.update(IoU, batch)
         mIoU_seg.update(mIoU, batch)
         FWIoU_seg.update(FWIoU, batch)
@@ -404,9 +410,9 @@ def run(
         if plots and batch_i < 3:
             if len(plot_semasks):
                 plot_semasks = torch.cat(plot_semasks, dim=0)
-            plot_images_and_masks(im, targets, gt_masks, paths, save_dir / f"val_batch{batch_i}_labels.jpg", names)
+            plot_images_and_masks(im, targets, gt_masks, seg_nc, paths, save_dir / f"val_batch{batch_i}_labels.jpg", names)
             plot_images_and_masks(im, output_to_target(preds, max_det=15),
-                plot_semasks, paths,save_dir / f"val_batch{batch_i}_pred.jpg", names,)  # pred
+                plot_semasks, seg_nc, paths,save_dir / f"val_batch{batch_i}_pred.jpg", names,)  # pred
 
     # Compute metrics for detection
     stats = [torch.cat(x, 0).cpu().numpy() for x in zip(*stats)]  # to numpy
@@ -416,15 +422,22 @@ def run(
     nt = np.bincount(stats[3].astype(int), minlength=nc)  # number of targets per class
 
      # Compute metrics for semantic segmentation （pixelAccuracy， IntersectionOverUnion， meanIntersectionOverUnion）
-    semantic_result = (acc_seg.avg, meanAcc_seg.avg, IoU_seg.avg, mIoU_seg.avg, FWIoU_seg.avg)
+    semantic_result = ( pa_seg.avg, mpa_seg.avg,  mIoU_seg.avg, FWIoU_seg.avg)
 
     # Print results of detection and semantic
+    LOGGER.info(("%22s" + "%11s" * 5) % ("Class", "Images",'Mask(PA', 'mPA', 'MIoU', 'FWIoU)'))
+    pf = '%22s' + '%11i' * 1 + '%11.3g' * 4  # print format 5
+    LOGGER.info(pf % ("all_mask", seen, *semantic_result))
+
+    LOGGER.info(("%22s" + "%11s" * 3) % ("Class", "Images",'Mask(CPA', 'IoU'))
+    pf = '%22s' + '%11i' * 1 + '%11.3g' * 2  # print format 5
+    
+    for idx, (cpa, iou) in enumerate(zip( cpa_seg.avg, IoU_seg.avg)):
+        LOGGER.info(pf % (str(idx), seen, cpa, iou))
+
+
     pf = '%22s' + '%11i' * 2 + '%11.3g' * 4  # print format 4
     LOGGER.info(pf % ("all_bbox", seen, nt.sum(), *metrics.mean_results()))
-
-    LOGGER.info(("%22s" + "%11s" * 6) % ("Class", "Images",'Mask(acc', 'meanAcc', 'IoU', 'MIoU', 'FWIoU)'))
-    pf = '%22s' + '%11i' * 1 + '%11.3g' * 5  # print format 5
-    LOGGER.info(pf % ("all_mask", seen, *semantic_result))
 
 
     if nt.sum() == 0:
@@ -448,7 +461,8 @@ def run(
     # callbacks.run('on_val_end')
 
     mp_bbox, mr_bbox, map50_bbox, map_bbox = metrics.mean_results()
-    acc_sem, meanAcc_sem, iou_sem, miou_sem, fwiou_sem = semantic_result
+    cpa_sem, iou_sem = cpa_seg.avg, IoU_seg.avg
+    pa_sem, mpa_sem, miou_sem, fwiou_sem = semantic_result
 
     # Save JSON
     if save_json and len(jdict):
@@ -483,8 +497,8 @@ def run(
     if not training:
         s = f"\n{len(list(save_dir.glob('labels/*.txt')))} labels saved to {save_dir / 'labels'}" if save_txt else ""
         LOGGER.info(f"Results saved to {colorstr('bold', save_dir)}{s}")
-    final_metric = mp_bbox, mr_bbox, map50_bbox, map_bbox, acc_sem, meanAcc_sem, iou_sem, miou_sem, fwiou_sem # 9, len(loss)=5 
-    return (*final_metric, *(loss.cpu() / len(dataloader)).tolist()), metrics.get_maps(nc), t # val loss
+    final_metric = mp_bbox, mr_bbox, map50_bbox, map_bbox, pa_sem, mpa_sem, miou_sem, fwiou_sem # 8, len(loss)=5 
+    return (*final_metric, *(loss.cpu() / len(dataloader)).tolist()),     metrics.get_maps(nc), t # val loss
     # results = (*final_metric, *(loss.cpu() / len(dataloader)).tolist())
 
 

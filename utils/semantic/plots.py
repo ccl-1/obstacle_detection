@@ -23,7 +23,7 @@ def onehot_to_mask(mask, palette):
     return x
 
 @threaded
-def plot_images_and_masks(images, targets, semasks, paths=None, fname="images.jpg", names=None):
+def plot_images_and_masks(images, targets, semasks, nc_seg, paths=None, fname="images.jpg", names=None):
     """Plots a grid of images, their labels, and masks with optional resizing and annotations, saving to fname."""
     # 将一个batch的图片都放在一个大图mosaic上面
     if isinstance(images, torch.Tensor):
@@ -71,16 +71,23 @@ def plot_images_and_masks(images, targets, semasks, paths=None, fname="images.jp
         if len(semasks):
             image_masks = semasks[i]
             im = np.asarray(annotator.im).copy()
-            color = [255,0,0]
+            color = [[255,255,255], [0,255,0], [0,0,255]]
+
             mh, mw = image_masks.shape 
             if mh != h or mw != w:
                 mask = image_masks.astype(np.uint8)
                 mask = cv2.resize(mask, (w, h))
-                mask = mask.astype(bool)
-            else:
-                mask = image_masks.astype(bool)
+
+            print(torch.unique(torch.tensor(mask)), "----------------")
+            for idx in range(1, nc_seg):
+                colored_mask = np.zeros((h,w, 3))
+                colored_mask[mask== idx] = color[idx-1]
+            
+            mask = mask >0
             with contextlib.suppress(Exception):
-                im[y:y + h, x:x + w, :][mask] = im[y:y + h, x:x + w, :][mask] * 0.4 + np.array(color) * 0.6
+                # im[y:y + h, x:x + w, :][mask] = im[y:y + h, x:x + w, :][mask] * 0.4 + np.array(colors) * 0.6
+                im[y:y + h, x:x + w, :][mask] = im[y:y + h, x:x + w, :][mask] * 0.4 + colored_mask[mask] * 0.6
+
             annotator.fromarray(im) # Update self.im from a numpy array
 
         #  -------------- plot bbox and labels ------------------------

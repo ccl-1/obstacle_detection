@@ -12,8 +12,11 @@ import torch.nn.functional as F
 
 def fitness(x):
     # Model fitness as a weighted combination of metrics
-    w = [0.0, 0.0, 0.1, 0.9,      0.9, 0.1, 0.1, 0.1, 0.9] # weights for [P, R, mAP@0.5, mAP@0.5:0.95, acc, maccm iou, MIOU,FWMIOU]
-    return (x[:, :len(w)] * w).sum(1)
+    w1 = [0.0, 0.0, 0.1, 0.9]   # weights for [P, R, mAP@0.5, mAP@0.5:0.95]
+    w2 = [0.9, 0.9, 0.9, 0.9]   # pa, mpa , MIOU,FWMIOU]
+    return (x[:, :4] * w1).sum(1) + (x[:, -4:] * w2).sum(1)
+    
+
 
 
 def ap_per_class_box(
@@ -214,8 +217,8 @@ class SegmentationMetric(object):
         # IoU = TP / (TP + FP + FN)
         intersection = np.diag(self.confusionMatrix)
         union = np.sum(self.confusionMatrix, axis=1) + np.sum(self.confusionMatrix, axis=0) - np.diag(self.confusionMatrix)
-        IoU = intersection / union
-        IoU[np.isnan(IoU)] = 0
+        IoU = intersection / union 
+        IoU[np.isnan(IoU)] = 0 #  返回列表，其值为各个类别的IoU
         mIoU = np.nanmean(IoU)
         return mIoU
     
@@ -224,7 +227,7 @@ class SegmentationMetric(object):
         union = np.sum(self.confusionMatrix, axis=1) + np.sum(self.confusionMatrix, axis=0) - np.diag(self.confusionMatrix)
         IoU = intersection / union
         IoU[np.isnan(IoU)] = 0
-        return IoU[1]
+        return IoU
 
     def genConfusionMatrix(self, imgPredict, imgLabel):
         # remove classes from unlabeled pixels in gt image and predict
@@ -234,7 +237,7 @@ class SegmentationMetric(object):
         count = np.bincount(label, minlength=self.numClass**2)
         confusionMatrix = count.reshape(self.numClass, self.numClass)
         return confusionMatrix
-
+    
     def Frequency_Weighted_Intersection_over_Union(self):
         # FWIOU =     [(TP+FN)/(TP+FP+TN+FN)] *[TP / (TP + FP + FN)]
         freq = np.sum(self.confusionMatrix, axis=1) / np.sum(self.confusionMatrix)
@@ -295,14 +298,16 @@ class Semantic_Metrics:
         
         self.metric_mask.reset()
         self.metric_mask.addBatch(pred_masks, gt_masks)
-        acc = self.metric_mask.pixelAccuracy()
-        meanAcc = self.metric_mask.meanPixelAccuracy()
+        
+        cpa = self.metric_mask.classPixelAccuracy()
+        pa = self.metric_mask.pixelAccuracy()
+        mpa = self.metric_mask.meanPixelAccuracy()
 
         IoU = self.metric_mask.IntersectionOverUnion()
         mIoU = self.metric_mask.meanIntersectionOverUnion()
         FWIoU = self.metric_mask.Frequency_Weighted_Intersection_over_Union()
 
-        return acc, meanAcc, IoU, mIoU, FWIoU
+        return cpa, pa, mpa, IoU, mIoU, FWIoU
 
 
     
@@ -317,9 +322,10 @@ KEYS = [
     "metrics/recall(B)",
     "metrics/mAP_0.5(B)",
     "metrics/mAP_0.5:0.95(B)", 
-    "metrics/acc(S)",       
-    "metrics/meanAcc(S)",       
-    "metrics/IoU(S)",
+    # "metrics/CPA(S)",
+    # "metrics/IoU(S)",       
+    "metrics/PA(S)",       
+    "metrics/MPA(S)",       
     "metrics/MIOUS(S)",        
     "metrics/FWIOUS(S)",       
     "val/box_loss",             # val loss
@@ -339,6 +345,6 @@ BEST_KEYS = [
     "best/recall(B)",
     "best/mAP_0.5(B)",
     "best/mAP_0.5:0.95(B)",
-    "best/meanAcc(S)",       
+    "best/MPA(S)",       
     "best/MIOUS(S)",
     "best/FWIOUS(S)",]

@@ -24,7 +24,7 @@ class ComputeLoss:
         # Define criteria
         BCEcls = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([h["cls_pw"]], device=device)) #  one single class.
         BCEobj = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([h["obj_pw"]], device=device))
-        CEseg = nn.CrossEntropyLoss(ignore_index=0)
+        CEseg = nn.CrossEntropyLoss() # ignore_index=0
         BCEseg = nn.BCEWithLogitsLoss()
         self.BCEseg = BCEseg
         self.CEseg = CEseg

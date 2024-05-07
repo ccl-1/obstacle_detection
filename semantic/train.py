@@ -99,13 +99,12 @@ GIT_INFO = check_git_info()
 
 
 
-label_mapping_obstacle = {0: 0, 215: 1} # ignore_label=-1,   for obstacle
-label_mapping_bdd100k = {0: 0, 255:1, 127:2} # ignore_label=-1,    for bdd 100k  0, 127, 255
+label_mapping_obstacle = {0: 0, 215: 1} 
+label_mapping_bdd100k = {0: 0, 255:1, 127:2} 
+label_mapping_rs19 = {0: 0, 255: 1}
 label_mapping_coco128 = None
-# [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 14, 15, 16, 17, 18, 21, 22, 23, 
-#  24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 39, 40, 41, 42, 
-#  43, 44, 45, 46, 47, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 
-#  62, 63, 64, 65, 66, 68, 69, 70, 72, 73, 74, 75, 76, 77, 78, 80]
+
+
 
 
 def train(hyp, opt, device, callbacks):
@@ -130,7 +129,8 @@ def train(hyp, opt, device, callbacks):
         freeze,
         mask_ratio,
         label_map,
-        train_mode
+        train_mode,
+        use_bdd100k_5
     ) = (
         Path(opt.save_dir),
         opt.epochs,
@@ -147,16 +147,17 @@ def train(hyp, opt, device, callbacks):
         opt.freeze,
         opt.mask_ratio,
         opt.label_map,
-        opt.train_mode
+        opt.train_mode,
+        opt.use_bdd100k_5
     )
     # callbacks.run('on_pretrain_routine_start')
 
     if label_map == 'bdd100k':
-        label_mapping = label_mapping_bdd100k
+        label_map = label_mapping_bdd100k
     elif label_map == 'coco128':
-        label_mapping = label_mapping_coco128
+        label_map = label_mapping_coco128
     else: # label_map == 'obstacle':
-        label_mapping = label_mapping_obstacle
+        label_map = label_mapping_obstacle
 
 
     # Directories
@@ -190,7 +191,14 @@ def train(hyp, opt, device, callbacks):
         data_dict = data_dict or check_dataset(data)  # check if None
     train_path, val_path = data_dict["train"], data_dict["val"]
     nc = 1 if single_cls else int(data_dict["nc"])  # number of classes
+    seg_nc =  int(data_dict["nc_seg"])  # number of classes
     names = {0: "item"} if single_cls and len(data_dict["names"]) != 1 else data_dict["names"]  # class names
+
+    if use_bdd100k_5:
+        names = {0: 'car', 1: 'person', 2: 'rider', 3: 'traffic sign', 4: 'traffic light'}
+        nc = 5
+        data_dict["nc"] = 5
+
     is_coco = isinstance(val_path, str) and val_path.endswith("coco/val2017.txt")  # COCO dataset
 
     # Model
@@ -297,7 +305,8 @@ def train(hyp, opt, device, callbacks):
         shuffle=True,
         mask_downsample_ratio=mask_ratio,
         overlap_mask=overlap,
-        label_mapping=label_mapping,
+        label_mapping=label_map,
+        use_bdd100k_5=use_bdd100k_5,
     )
     labels = np.concatenate(dataset.labels, 0)
     mlc = int(labels[:, 0].max())  # max label class
@@ -320,7 +329,8 @@ def train(hyp, opt, device, callbacks):
             mask_downsample_ratio=mask_ratio,
             overlap_mask=overlap,
             prefix=colorstr("val: "),
-            label_mapping=label_mapping,
+            label_mapping=label_map,
+            use_bdd100k_5=use_bdd100k_5
         )[0]
 
         if not resume:
@@ -457,7 +467,7 @@ def train(hyp, opt, device, callbacks):
                 # Mosaic plots
                 if plots:
                     if ni < 3:
-                        plot_images_and_masks(imgs, targets, masks, paths, save_dir / f"train_batch{ni}.jpg")
+                        plot_images_and_masks(imgs, targets, masks, seg_nc, paths, save_dir / f"train_batch{ni}.jpg")
                     if ni == 10:
                         files = sorted(save_dir.glob("train*.jpg"))
                         logger.log_images(files, "Mosaics", epoch)
@@ -489,7 +499,8 @@ def train(hyp, opt, device, callbacks):
                     compute_loss=compute_loss,
                     mask_downsample_ratio=mask_ratio,
                     overlap=overlap,
-                    label_mapping = label_mapping, 
+                    label_mapping = label_map, 
+                    use_bdd100k_5 = use_bdd100k_5
                 )
 
             # Update best mAP
@@ -497,6 +508,7 @@ def train(hyp, opt, device, callbacks):
             stop = stopper(epoch=epoch, fitness=fi)  # early stop check
             if fi > best_fitness:
                 best_fitness = fi
+            
 
             # in val.py,  results = (*final_metric, *(loss.cpu() / len(dataloader)).tolist())
             log_vals = list(mloss) + list(results) + lr #  train loss(5) + metrics+ val loss(9+5) + lr(3)  
@@ -562,6 +574,7 @@ def train(hyp, opt, device, callbacks):
                         compute_loss=compute_loss,
                         mask_downsample_ratio=mask_ratio,
                         overlap=overlap,
+                        use_bdd100k_5=use_bdd100k_5,
                     )  # val best model with plots
                     if is_coco:
                         # callbacks.run('on_fit_epoch_end', list(mloss) + list(results) + lr, epoch, best_fitness, fi)
@@ -597,7 +610,9 @@ def parse_opt(known=False):
     parser.add_argument("--data", type=str, default="data/obstacle.yaml", help="dataset.yaml path")
     parser.add_argument("--label_map", type=str, default="obstacle", help="dataset.yaml path")
     # parser.add_argument("--data", type=str, default="data/bdd100k-seg.yaml", help="dataset.yaml path")
-    parser.add_argument("--train_mode", type=str, default="None", help="det_only, seg_only")
+    parser.add_argument("--train_mode", type=str, default="None", help="det_only, seg_only") 
+    parser.add_argument("--use_bdd100k_5", type=bool, default=False, help=" use_bdd100k_5 or not ")
+
 
 
     parser.add_argument("--hyp", type=str, default=ROOT / "data/hyps/hyp.scratch-low.yaml", help="hyperparameters path")

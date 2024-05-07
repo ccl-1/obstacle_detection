@@ -7,7 +7,7 @@
 #     └── coco128  ← downloads here (7 MB)
 
 # Train/val/test sets as 1) dir: path/to/imgs, 2) file: path/to/imgs.txt, or 3) list: [path/to/imgs1, path/to/imgs2, ..]
-path: /media/ym-004/9AC2F49AC2F47BB7/zoro/data/bdd100k/For_OD/ # dataset root dir
+path: /media/ubuntu/zoro/ubuntu/data/railway_obstacle_detection/bdd100k/For_OD/ # dataset root dir
 
 train: images/train # train images (relative to 'path') 128 images
 val: images/val # val images (relative to 'path') 128 images
@@ -19,21 +19,12 @@ seg_val: images/val # val images (relative to 'path') 128 images
 nc: 10
 nc_seg: 3
 
+
 seg_names:
-  0: background
+  0: bg
   1: lane
   2: drivable
 
-# seg_names:
-#   0: lane
-#   1: drivable
-
-# self.label_mapping = {0: 0, 255:1, 127:2} # ignore_label=-1,    for bdd 100k  0, 127, 255
-
-# car bus train truck  合并 ...  id_dict_single = {'car': 0, 'bus': 1, 'truck': 2,'train': 3}
-#  删掉train 会不会精度会上升 ... 
-# rider (包含了 motor and bike) 不用合并 ...
-# traffic sign，  traffic light
 names:
   0: car
   1: bus
@@ -45,3 +36,11 @@ names:
   7: rider
   8: traffic sign
   9: traffic light
+
+# After merge 
+  # 0: car
+  # 1: person
+  # 2: rider
+  # 3: traffic sign
+  # 4: traffic light
+
