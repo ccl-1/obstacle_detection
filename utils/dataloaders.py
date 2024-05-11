@@ -551,8 +551,8 @@ class LoadImagesAndLabels(Dataset):
         prefix="",
         rank=-1,
         seed=0,
-        label_mapping=None,
-        use_bdd100k_5=False
+        # label_mapping=None,
+        # use_bdd100k_5=False
     ):
         self.img_size = img_size
         self.augment = augment
@@ -634,6 +634,7 @@ class LoadImagesAndLabels(Dataset):
         self.batch = bi  # batch index of image
         self.n = n
         self.indices = np.arange(n)
+        
         if rank > -1:  # DDP indices (see: SmartDistributedSampler)
             # force each rank (i.e. GPU process) to sample the same subset of data on every epoch
             self.indices = self.indices[np.random.RandomState(seed=seed).permutation(n) % WORLD_SIZE == RANK]

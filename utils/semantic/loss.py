@@ -12,10 +12,11 @@ from ..torch_utils import de_parallel
 
 class ComputeLoss:
     # Compute losses
-    def __init__(self, model, autobalance=False, overlap=False):
+    def __init__(self, model, train_mode=None, autobalance=False, overlap=False):
         """Initializes the compute loss function for YOLOv5 models with options for autobalancing and overlap
         handling.
         """
+        self.train_mode = train_mode
         self.sort_obj_iou = False
         self.overlap = overlap
         device = next(model.parameters()).device  # get model device
@@ -112,7 +113,7 @@ class ComputeLoss:
         pred_masks = pred_masks.type(masks.dtype) #  torch.float32
 
         # print(torch.unique(masks[1,:,:])) # check mask labels after augmentation
-
+        
         # pixel classify loss
         pixel_loss = self.CEseg(pred_masks, masks.long()) # without onehot, 多分类。  [bs, C，*]  [bs，*] 
         l_seg += pixel_loss
@@ -132,7 +133,15 @@ class ComputeLoss:
         lobj *= self.hyp["obj"] # obj: 1.0 
         lcls *= self.hyp["cls"] # cls: 0.5 
         l_seg *= self.hyp["box"]  
-        l_dice *= self.hyp["box"] 
+        l_dice *= self.hyp["cls"] 
+
+        if self.train_mode == 'det_only':
+            l_seg *= 0
+            l_dice *= 0
+        if self.train_mode == 'seg_only':
+            lcls *= 0
+            lobj *= 0
+            lbox *= 0
 
         loss = lbox + lobj + lcls + l_seg + l_dice
         # print("------------------", lbox.detach())

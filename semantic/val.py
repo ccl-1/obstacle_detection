@@ -32,6 +32,7 @@ from pycocotools import mask as maskUtils
 import numpy as np
 import torch
 import torchvision.transforms as transforms
+import yaml
 
 from tqdm import tqdm
 
@@ -46,6 +47,7 @@ import torch.nn.functional as F
 from models.common import DetectMultiBackend
 from utils.callbacks import Callbacks
 from utils.general import (
+    intersect_dicts,
     LOGGER,
     NUM_THREADS,
     TQDM_BAR_FORMAT,
@@ -76,15 +78,17 @@ from utils.torch_utils import select_device, smart_inference_mode
 
 
 
+
 not_ignore_ids = [1]
 all_stuff_ids = [1,
     183, # other
     0, # unlabeled
 ]
 
-
+label_mapping_object = {0: 0, 255: 1} 
 label_mapping_obstacle = {0: 0, 215: 1} # ignore_label=-1,   for obstacle
 label_mapping_bdd100k = {0: 0, 255:1, 127:2} # ignore_label=-1,    for bdd 100k  0, 127, 255
+label_mapping_rs19 = {0: 0, 255: 1}
 label_mapping_coco128 = None
 
 def getDataIds(name = 'semantic'):
@@ -187,6 +191,9 @@ def run(
     half=True,  # use FP16 half-precision inference
     dnn=False,  # use OpenCV DNN for ONNX inference
     label_mapping = None,
+    use_bdd100k_5 = True,
+    data_mode=None,
+
     model=None,
     dataloader=None,
     save_dir=Path(""),
@@ -195,12 +202,15 @@ def run(
     mask_downsample_ratio=1,
     compute_loss=None,
     callbacks=Callbacks(),
-    use_bdd100k_5 = True
 ):
     if label_mapping == 'bdd100k':
         label_map = label_mapping_bdd100k
     elif label_mapping == 'coco128':
         label_map = label_mapping_coco128
+    elif label_mapping == 'rs19':
+        label_map = label_mapping_rs19
+    elif label_mapping == 'object':
+        label_map = label_mapping_object
     else: # label_map == 'obstacle':
         label_map = label_mapping_obstacle
 
@@ -242,6 +252,12 @@ def run(
     seg_names = data.get('seg_names', [])  # names of semantic classes
     seg_nc = len(seg_names)  # number of stuff classes
 
+    if use_bdd100k_5:
+        names = {0: 'car', 1: 'person', 2: 'rider', 3: 'traffic sign', 4: 'traffic light'}
+        nc = 5
+        data["nc"] = 5
+   
+
     iouv = torch.linspace(0.5, 0.95, 10, device=device)  # iou vector for mAP@0.5:0.95
     niou = iouv.numel()
 
@@ -250,8 +266,9 @@ def run(
 
     # Dataloader
     if not training:
-        if pt and not single_cls:  # check --weights are trained on --data
+        if not single_cls:  # check --weights are trained on --data
             ncm = model.model.nc
+            print("============\n", ncm, nc)
             assert ncm == nc, (
                 f"{weights} ({ncm} classes) trained on different --data than what you passed ({nc} "
                 f"classes). Pass correct combination of --weights and --data that are trained together."
@@ -259,6 +276,8 @@ def run(
         model.warmup(imgsz=(1 if pt else batch_size, 3, imgsz, imgsz))  # warmup
         pad, rect = (0.0, False) if task == "speed" else (0.5, pt)  # square inference for benchmarks
         task = task if task in ("train", "val", "test") else "val"  # path to train/val/test images
+
+       
         dataloader = create_dataloader(
             data[task],
             imgsz,
@@ -272,6 +291,8 @@ def run(
             overlap_mask=overlap,
             mask_downsample_ratio=mask_downsample_ratio,
             label_mapping=label_map,
+            use_bdd100k_5 = use_bdd100k_5,
+            data_mode=data_mode,
         )[0]
 
     seen = 0
@@ -298,7 +319,6 @@ def run(
     jdict, stats = [], []
     pbar = tqdm(dataloader, desc=s, bar_format=TQDM_BAR_FORMAT)  # progress bar # logger title head here  ... 
     for batch_i, (im, targets, gt_masks, paths, shapes) in enumerate(pbar):
-        
         with dt[0]:
             if cuda:
                 im = im.to(device, non_blocking=True)
@@ -308,13 +328,16 @@ def run(
             im = im.half() if half else im.float()  # uint8 to fp16/32
             im /= 255  # 0 - 255 to 0.0 - 1.0
             nb, _, height, width = im.shape  # batch size, channels, height, width
+        
+        # from torchvision.utils import save_image
+        # save_image(im[0], 'test_im.png')
 
         # Inference
         with dt[1]:
-            output = model(im) if compute_loss else (model(im, augment=augment), None)
+            output = model(im) if compute_loss else model(im, augment=augment)
             preds, train_out, pred_masks = output[0][0],  output[0][1], output[1]
             # torch.Size([b, 25200, 31]) , list(3).size=orch.Size([b, 3, 84, 84, 31]),    torch.Size([b, 2, 640, 640])  
-
+        
         # Loss
         if compute_loss:
             loss += compute_loss((train_out, pred_masks), targets, gt_masks)[1]  # box, obj, cls
@@ -328,7 +351,7 @@ def run(
 
         # Metrics
         semantic_metrics = Semantic_Metrics(nc = seg_nc)
-        cpa, pa, mpa, IoU, mIoU, FWIoU = semantic_metrics.update(pred_masks, gt_masks)
+        cpa, pa, mpa, IoU, mIoU, FWIoU = semantic_metrics.update(pred_masks, gt_masks) # # (b,c,h,w), (b,h,w)
         batch = pred_masks.size()[0]
         cpa_seg.update(cpa, batch)
         pa_seg.update(pa, batch)
@@ -380,7 +403,9 @@ def run(
                 save_one_json(predn, jdict, path, class_map)  # append to COCO-JSON dictionary
 
             # --------------------  Semantic Segmentation ------------------------------------
-            h0, w0 = shape
+            # h0, w0 = shape
+            h0, w0 = gt_masks.shape[-2:]
+
             _, mask_h, mask_w = pred_mask.shape # # ([2, 672, 672])
             h_ratio = mask_h / h0
             w_ratio = mask_w / w0
@@ -434,7 +459,8 @@ def run(
     
     for idx, (cpa, iou) in enumerate(zip( cpa_seg.avg, IoU_seg.avg)):
         LOGGER.info(pf % (str(idx), seen, cpa, iou))
-
+    LOGGER.info(pf % ('avg', seen, np.mean(cpa_seg.avg[1:]), np.mean(IoU_seg.avg[1:])))
+    
 
     pf = '%22s' + '%11i' * 2 + '%11.3g' * 4  # print format 4
     LOGGER.info(pf % ("all_bbox", seen, nt.sum(), *metrics.mean_results()))
@@ -461,7 +487,7 @@ def run(
     # callbacks.run('on_val_end')
 
     mp_bbox, mr_bbox, map50_bbox, map_bbox = metrics.mean_results()
-    cpa_sem, iou_sem = cpa_seg.avg, IoU_seg.avg
+    cpa_sem, iou_sem = np.mean(cpa_seg.avg[1:]) , np.mean(IoU_seg.avg[1:])
     pa_sem, mpa_sem, miou_sem, fwiou_sem = semantic_result
 
     # Save JSON
@@ -496,8 +522,8 @@ def run(
     model.float()  # for training
     if not training:
         s = f"\n{len(list(save_dir.glob('labels/*.txt')))} labels saved to {save_dir / 'labels'}" if save_txt else ""
-        LOGGER.info(f"Results saved to {colorstr('bold', save_dir)}{s}")
-    final_metric = mp_bbox, mr_bbox, map50_bbox, map_bbox, pa_sem, mpa_sem, miou_sem, fwiou_sem # 8, len(loss)=5 
+        LOGGER.info(f"Results saved to {colorstr('bold', save_dir)}{s}") 
+    final_metric = mp_bbox, mr_bbox, map50_bbox, map_bbox, pa_sem, cpa_sem, iou_sem, fwiou_sem # 8, len(loss)=5 
     return (*final_metric, *(loss.cpu() / len(dataloader)).tolist()),     metrics.get_maps(nc), t # val loss
     # results = (*final_metric, *(loss.cpu() / len(dataloader)).tolist())
 
@@ -509,9 +535,14 @@ def parse_opt():
     """
     parser = argparse.ArgumentParser()
     parser.add_argument("--data", type=str, default="data/bdd100k-seg.yaml", help="dataset.yaml path")
-    parser.add_argument("--weights", nargs="+", type=str, default="runs/train-seg/bdd100k_raw/weights/best.pt", help="model path(s)")
+    parser.add_argument("--weights", nargs="+", type=str, default="runs/train-seg/bdd100k_det_first/exp/weights/last.pt", help="model path(s)")
     parser.add_argument("--batch-size", type=int, default=16, help="batch size")
     parser.add_argument("--imgsz", "--img", "--img-size", type=int, default=640, help="inference size (pixels)")
+
+    parser.add_argument("--label_mapping", type=str, default="obstacle", help="dataset.yaml path")
+    parser.add_argument("--use_bdd100k_5", type=bool, default=False, help=" use_bdd100k_5 or not ")
+    parser.add_argument("--data_mode", type=str, default=None, help="det, seg") 
+
     parser.add_argument("--conf-thres", type=float, default=0.001, help="confidence threshold")
     parser.add_argument("--iou-thres", type=float, default=0.6, help="NMS IoU threshold")
     parser.add_argument("--max-det", type=int, default=300, help="maximum detections per image")
@@ -530,7 +561,6 @@ def parse_opt():
     parser.add_argument("--exist-ok", action="store_true", help="existing project/name ok, do not increment")
     parser.add_argument("--half", action="store_true", help="use FP16 half-precision inference")
     parser.add_argument("--dnn", action="store_true", help="use OpenCV DNN for ONNX inference")
-    parser.add_argument("--label_map", type=str, default="obstacle", help="dataset.yaml path")
     opt = parser.parse_args()
     opt.data = check_yaml(opt.data)  # check YAML
     # opt.save_json |= opt.data.endswith('coco.yaml')

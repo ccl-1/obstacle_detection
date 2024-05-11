@@ -10,14 +10,14 @@ from ..metrics import ap_per_class
 import torch.nn.functional as F
 
 
+    # final_metric = mp_bbox, mr_bbox, map50_bbox, map_bbox, pa_sem, mpa_sem, miou_sem, fwiou_sem # 8, len(loss)=5 
+#
 def fitness(x):
     # Model fitness as a weighted combination of metrics
-    w1 = [0.0, 0.0, 0.1, 0.9]   # weights for [P, R, mAP@0.5, mAP@0.5:0.95]
-    w2 = [0.9, 0.9, 0.9, 0.9]   # pa, mpa , MIOU,FWMIOU]
+    w1 = [0.0, 0.0, 0.9, 0.9]   # weights for [P, R, mAP@0.5, mAP@0.5:0.95]
+    w2 = [0.1, 0.9, 0.9, 0.1]   # pa, mpa , MIOU,FWMIOU]
     return (x[:, :4] * w1).sum(1) + (x[:, -4:] * w2).sum(1)
     
-
-
 
 def ap_per_class_box(
         tp_b,

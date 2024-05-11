@@ -98,7 +98,7 @@ WORLD_SIZE = int(os.getenv("WORLD_SIZE", 1))
 GIT_INFO = check_git_info()
 
 
-
+label_mapping_object = {0: 0, 255: 1} 
 label_mapping_obstacle = {0: 0, 215: 1} 
 label_mapping_bdd100k = {0: 0, 255:1, 127:2} 
 label_mapping_rs19 = {0: 0, 255: 1}
@@ -130,7 +130,8 @@ def train(hyp, opt, device, callbacks):
         mask_ratio,
         label_map,
         train_mode,
-        use_bdd100k_5
+        use_bdd100k_5,
+        data_mode,
     ) = (
         Path(opt.save_dir),
         opt.epochs,
@@ -148,7 +149,8 @@ def train(hyp, opt, device, callbacks):
         opt.mask_ratio,
         opt.label_map,
         opt.train_mode,
-        opt.use_bdd100k_5
+        opt.use_bdd100k_5,
+        opt.data_mode
     )
     # callbacks.run('on_pretrain_routine_start')
 
@@ -156,6 +158,10 @@ def train(hyp, opt, device, callbacks):
         label_map = label_mapping_bdd100k
     elif label_map == 'coco128':
         label_map = label_mapping_coco128
+    elif label_map == 'rs19':
+        label_map = label_mapping_rs19
+    elif label_map == 'object':
+        label_map = label_mapping_object
     else: # label_map == 'obstacle':
         label_map = label_mapping_obstacle
 
@@ -218,7 +224,7 @@ def train(hyp, opt, device, callbacks):
         model = DetectionSemanticModel(cfg, ch=3, nc=nc, anchors=hyp.get("anchors")).to(device)  # create
     amp = check_amp(model)  # check AMP
 
-    # Freeze ----------------------------------------------------------------------------------------------
+    # ---------------------- Freeze ----------------------------------------------------------------------------------------------
     freeze = [f"model.{x}." for x in (freeze if len(freeze) > 1 else range(freeze[0]))]  # layers to freeze
     for k, v in model.named_parameters():
         v.requires_grad = True  # train all layers
@@ -307,8 +313,17 @@ def train(hyp, opt, device, callbacks):
         overlap_mask=overlap,
         label_mapping=label_map,
         use_bdd100k_5=use_bdd100k_5,
+        data_mode=data_mode
     )
+
+    # a =[]
+    # for i in dataset.labels:
+    #     if i.shape
+    #     a.append(i.shape)
+    # print(set(a))
+    # print(dataset.labels)
     labels = np.concatenate(dataset.labels, 0)
+    
     mlc = int(labels[:, 0].max())  # max label class
     assert mlc < nc, f"Label class {mlc} exceeds nc={nc} in {data}. Possible class labels are 0-{nc - 1}"
 
@@ -322,7 +337,8 @@ def train(hyp, opt, device, callbacks):
             single_cls,
             hyp=hyp,
             cache=None if noval else opt.cache,
-            rect=True,
+            rect=True, # TODO: OBJECT ERROR
+            # rect=False, 
             rank=-1,
             workers=workers * 2,
             pad=0.5,
@@ -330,7 +346,8 @@ def train(hyp, opt, device, callbacks):
             overlap_mask=overlap,
             prefix=colorstr("val: "),
             label_mapping=label_map,
-            use_bdd100k_5=use_bdd100k_5
+            use_bdd100k_5=use_bdd100k_5,
+            data_mode=data_mode,
         )[0]
 
         if not resume:
@@ -369,7 +386,7 @@ def train(hyp, opt, device, callbacks):
     scheduler.last_epoch = start_epoch - 1  # do not move
     scaler = torch.cuda.amp.GradScaler(enabled=amp)
     stopper, stop = EarlyStopping(patience=opt.patience), False
-    compute_loss = ComputeLoss(model, overlap=overlap)  # init loss class
+    compute_loss = ComputeLoss(model, train_mode=train_mode, overlap=overlap)  # init loss class
     # callbacks.run('on_train_start')
     LOGGER.info(
         f'Image sizes {imgsz} train, {imgsz} val\n'
@@ -500,7 +517,8 @@ def train(hyp, opt, device, callbacks):
                     mask_downsample_ratio=mask_ratio,
                     overlap=overlap,
                     label_mapping = label_map, 
-                    use_bdd100k_5 = use_bdd100k_5
+                    use_bdd100k_5 = use_bdd100k_5,
+                    data_mode=data_mode,
                 )
 
             # Update best mAP
@@ -509,7 +527,6 @@ def train(hyp, opt, device, callbacks):
             if fi > best_fitness:
                 best_fitness = fi
             
-
             # in val.py,  results = (*final_metric, *(loss.cpu() / len(dataloader)).tolist())
             log_vals = list(mloss) + list(results) + lr #  train loss(5) + metrics+ val loss(9+5) + lr(3)  
             # Log val metrics and media
@@ -540,14 +557,14 @@ def train(hyp, opt, device, callbacks):
                 del ckpt
                 # callbacks.run('on_model_save', last, epoch, final_epoch, best_fitness, fi)
 
-        # EarlyStopping
-        if RANK != -1:  # if DDP training
-            broadcast_list = [stop if RANK == 0 else None]
-            dist.broadcast_object_list(broadcast_list, 0)  # broadcast 'stop' to all ranks
-            if RANK != 0:
-                stop = broadcast_list[0]
-        if stop:
-            break  # must break all DDP ranks
+        # # EarlyStopping
+        # if RANK != -1:  # if DDP training
+        #     broadcast_list = [stop if RANK == 0 else None]
+        #     dist.broadcast_object_list(broadcast_list, 0)  # broadcast 'stop' to all ranks
+        #     if RANK != 0:
+        #         stop = broadcast_list[0]
+        # if stop:
+        #     break  # must break all DDP ranks
 
         # end epoch ----------------------------------------------------------------------------------------------------
     # end training -----------------------------------------------------------------------------------------------------
@@ -611,9 +628,8 @@ def parse_opt(known=False):
     parser.add_argument("--label_map", type=str, default="obstacle", help="dataset.yaml path")
     # parser.add_argument("--data", type=str, default="data/bdd100k-seg.yaml", help="dataset.yaml path")
     parser.add_argument("--train_mode", type=str, default="None", help="det_only, seg_only") 
+    parser.add_argument("--data_mode", type=str, default=None, help="det, seg") 
     parser.add_argument("--use_bdd100k_5", type=bool, default=False, help=" use_bdd100k_5 or not ")
-
-
 
     parser.add_argument("--hyp", type=str, default=ROOT / "data/hyps/hyp.scratch-low.yaml", help="hyperparameters path")
     parser.add_argument("--epochs", type=int, default=50, help="total training epochs")

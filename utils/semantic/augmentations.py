@@ -65,6 +65,8 @@ def letterbox(im, label, new_shape=(640, 640), color=(114, 114, 114), auto=True,
 
     if shape[::-1] != new_unpad:  # resize
         im = cv2.resize(im, new_unpad, interpolation=cv2.INTER_LINEAR)
+        label = cv2.resize(label, new_unpad, interpolation=cv2.INTER_NEAREST)
+
     top, bottom = int(round(dh - 0.1)), int(round(dh + 0.1))
     left, right = int(round(dw - 0.1)), int(round(dw + 0.1))
     im = cv2.copyMakeBorder(im, top, bottom, left, right, cv2.BORDER_CONSTANT, value=color)  # add border

@@ -71,11 +71,11 @@ def plot_images_and_masks(images, targets, semasks, nc_seg, paths=None, fname="i
         if len(semasks):
             image_masks = semasks[i]
             im = np.asarray(annotator.im).copy()
-            color = [[255,255,255], [0,255,0], [0,0,255]]
+            color = [[255,0,0], [0,255,0], [0,0,255]]
 
             mh, mw = image_masks.shape 
-            if mh != h or mw != w:
-                mask = image_masks.astype(np.uint8)
+            mask = image_masks.astype(np.uint8)
+            if mh != h or mw != w:  
                 mask = cv2.resize(mask, (w, h))
 
             for idx in range(1, nc_seg):

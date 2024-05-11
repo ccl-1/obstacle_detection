@@ -243,8 +243,10 @@ def parse_opt():
     output preferences.
     """
     parser = argparse.ArgumentParser()
-    parser.add_argument("--weights", nargs="+", type=str, default="runs/train-seg/bdd100k_raw/weights/best.pt", help="model path(s)")
-    parser.add_argument("--source", type=str, default= "simulate.mp4", help="file/dir/URL/glob/screen/0(webcam)")
+    parser.add_argument("--weights", nargs="+", type=str, default="runs/train-seg/bdd100k_det_first/exp/weights/best.pt", help="model path(s)")
+    parser.add_argument("--source", type=str, default= "./data/images/bus.jpg", help="file/dir/URL/glob/screen/0(webcam)")
+    # parser.add_argument("--source", type=str, default= "simulate.mp4", help="file/dir/URL/glob/screen/0(webcam)")
+
     parser.add_argument("--data", type=str, default="data/bdd100k-seg.yaml", help="dataset.yaml path")
     
     parser.add_argument("--imgsz", "--img", "--img-size", nargs="+", type=int, default=[640], help="inference size h,w")

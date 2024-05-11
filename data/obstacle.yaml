@@ -15,33 +15,30 @@ val: images/val # val images (relative to 'path') 128 images
 seg_train: images/train # train images (relative to 'path') 128 images
 seg_val: images/val # val images (relative to 'path') 128 images
 
-nc: 17
+nc: 16
 
 nc_seg: 2
-# 这是映射之后的结果 ... , 如何忽略bg类别？ 
 seg_names:
   0: background
   1: track
-# self.label_mapping = {0: 0, 215: 1} # ignore_label=-1,   for obstacle
 
 names:
   0: Fallen Trees
   1: Stone
   2: broken tracks
-  3: buffalo
-  4: car
-  5: cow
-  6: deer
-  7: elephant
-  8: flood
-  9: goat
-  10: human
-  11: landslide
-  12: lion
-  13: monkey
-  14: peacock
-  15: tiger
-  16: truck
+  3: car
+  4: cow
+  5: deer
+  6: elephant
+  7: flood
+  8: goat
+  9: human
+  10: landslide
+  11: lion
+  12: monkey
+  13: peacock
+  14: tiger
+  15: excavator
 
 
 

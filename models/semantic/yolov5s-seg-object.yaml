@@ -2,7 +2,7 @@
 
 # Parameters
 nc: 16 # number of classes
-nc_seg: 2 
+nc_seg: 2
 
 depth_multiple: 0.33 # model depth multiple
 width_multiple: 0.5 # layer channel multiple

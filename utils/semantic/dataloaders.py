@@ -11,6 +11,7 @@ import math
 import hashlib
 from itertools import repeat
 from multiprocessing.pool import Pool
+from PIL import Image
 
 
 import sys
@@ -25,7 +26,7 @@ ROOT = Path(os.path.relpath(ROOT, Path.cwd()))  # relative
 import torch
 from torch.utils.data import DataLoader, distributed
 
-from utils.dataloaders import InfiniteDataLoader, Dataset,LoadImagesAndLabels, SmartDistributedSampler, seed_worker, verify_image_label
+from utils.dataloaders import InfiniteDataLoader,LoadImagesAndLabels, SmartDistributedSampler, seed_worker, exif_size
 from utils.general import LOGGER, TQDM_BAR_FORMAT, xywhn2xyxy,xyxy2xywhn, xyn2xy, bdd100k_10_to_5_class
 
 from utils.torch_utils import torch_distributed_zero_first
@@ -66,31 +67,55 @@ def create_dataloader(
     overlap_mask=False,
     seed=0,
     label_mapping=None,
-    use_bdd100k_5=False
+    use_bdd100k_5=False,
+    data_mode=None
 ):
     if rect and shuffle:
         LOGGER.warning("WARNING ⚠️ --rect is incompatible with DataLoader shuffle, setting shuffle=False")
         shuffle = False
     with torch_distributed_zero_first(rank):  # init dataset *.cache only once if DDP
-        dataset = LoadImagesAndLabelsAndMasks(
-            path,
-            imgsz,
-            batch_size,
-            augment=augment,  # augmentation
-            hyp=hyp,  # hyperparameters
-            rect=rect,  # rectangular batches
-            cache_images=cache,
-            single_cls=single_cls,
-            stride=int(stride),
-            pad=pad,
-            image_weights=image_weights,
-            prefix=prefix,
-            downsample_ratio=mask_downsample_ratio,
-            overlap=overlap_mask,
-            rank=rank,
-            label_mapping=label_mapping,
-            use_bdd100k_5 =use_bdd100k_5
-        )
+        
+        if data_mode == None:
+            dataset = LoadImagesAndLabelsAndMasks(
+                path,
+                imgsz,
+                batch_size,
+                augment=augment,  # augmentation
+                hyp=hyp,  # hyperparameters
+                rect=rect,  # rectangular batches
+                cache_images=cache,
+                single_cls=single_cls,
+                stride=int(stride),
+                pad=pad,
+                image_weights=image_weights,
+                prefix=prefix,
+                downsample_ratio=mask_downsample_ratio,
+                overlap=overlap_mask,
+                rank=rank,
+                label_mapping=label_mapping,
+                use_bdd100k_5 =use_bdd100k_5
+            )
+        else:
+            dataset = OnlyLoadImages_Masks(
+                path,
+                imgsz,
+                batch_size,
+                augment=augment,  # augmentation
+                hyp=hyp,  # hyperparameters
+                rect=rect,  # rectangular batches
+                cache_images=cache,
+                single_cls=single_cls,
+                stride=int(stride),
+                pad=pad,
+                image_weights=image_weights,
+                prefix=prefix,
+                downsample_ratio=mask_downsample_ratio,
+                overlap=overlap_mask,
+                rank=rank,
+                label_mapping=label_mapping,
+                use_bdd100k_5 =use_bdd100k_5,
+                data_mode=data_mode
+            )
 
     batch_size = min(batch_size, len(dataset))
     nd = torch.cuda.device_count()  # number of CUDA devices
@@ -100,17 +125,30 @@ def create_dataloader(
     
     generator = torch.Generator()
     generator.manual_seed(6148914691236517205 + seed + RANK)
-    return loader(
-        dataset,
-        batch_size=batch_size,
-        shuffle=shuffle and sampler is None,
-        num_workers=nw,
-        sampler=sampler,
-        pin_memory=True,
-        collate_fn=LoadImagesAndLabelsAndMasks.collate_fn4 if quad else LoadImagesAndLabelsAndMasks.collate_fn,
-        worker_init_fn=seed_worker,
-        generator=generator,
-    ), dataset
+    if data_mode == None:
+        return loader(
+            dataset,
+            batch_size=batch_size,
+            shuffle=shuffle and sampler is None,
+            num_workers=nw,
+            sampler=sampler,
+            pin_memory=True,
+            collate_fn=LoadImagesAndLabelsAndMasks.collate_fn4 if quad else LoadImagesAndLabelsAndMasks.collate_fn,
+            worker_init_fn=seed_worker,
+            generator=generator,
+        ), dataset
+    else:
+        return loader(
+            dataset,
+            batch_size=batch_size,
+            shuffle=shuffle and sampler is None,
+            num_workers=nw,
+            sampler=sampler,
+            pin_memory=True,
+            collate_fn=OnlyLoadImages_Masks.collate_fn4 if quad else OnlyLoadImages_Masks.collate_fn,
+            worker_init_fn=seed_worker,
+            generator=generator,
+        ), dataset
 
 
 
@@ -146,13 +184,16 @@ class LoadImagesAndLabelsAndMasks(LoadImagesAndLabels):  # for training/testing
     cache_version = 0.6
     def __init__(self, path, img_size=640, batch_size=16, augment=False, 
                  hyp=None, rect=False, image_weights=False, cache_images=False, single_cls=False, 
-                 stride=32, pad=0, min_items=0, prefix="", downsample_ratio=1, overlap=False, rank=-1, seed=0, label_mapping=None,use_bdd100k_5=False
+                 stride=32, pad=0, min_items=0, prefix="", downsample_ratio=1, 
+                 overlap=False, rank=-1, seed=0, label_mapping=None,use_bdd100k_5=False,
     ):
         super().__init__(path, img_size, batch_size, augment, hyp, rect, 
-                         image_weights, cache_images, single_cls, stride, pad, min_items, prefix, rank, seed, label_mapping, use_bdd100k_5=use_bdd100k_5)
+                         image_weights, cache_images, single_cls, stride, pad, min_items, 
+                         prefix, rank, seed) # , label_mapping, use_bdd100k_5=use_bdd100k_5
         self.downsample_ratio = downsample_ratio
         self.overlap = overlap
         self.label_mapping = label_mapping # for segmentation not detection
+        self.use_bdd100k_5 = use_bdd100k_5
         # self.class_weights = torch.FloatTensor([0.8373, 0.918]).cuda()
         
         self.img_size = img_size
@@ -232,18 +273,16 @@ class LoadImagesAndLabelsAndMasks(LoadImagesAndLabels):  # for training/testing
             shapes = None
         else:
             # semantic_labels.size()=torch.Size([640, 640]), 单通道，不是onehot编码的格式。（nc,w,h）
-            img, semantic_labels, (h0, w0), (h, w) = self.load_mask_image(index)
-            
+            img, semantic_labels, (h0, w0), (h, w) = self.load_mask_image(index) # hw_original, hw_resized -> hw_resized
 
             # Letterbox
-            shape = self.batch_shapes[self.batch[index]] if self.rect else self.img_size  # final letterboxed shape
+            shape = self.batch_shapes[self.batch[index]] if self.rect else self.img_size  # final letterboxed shape # [320 640]
             img, semantic_labels, ratio, pad = letterbox(img, semantic_labels, shape, auto=False, scaleup=self.augment)
             shapes = (h0, w0), ((h / h0, w / w0), pad)  # for COCO mAP rescaling
-
+          
             labels = self.labels[index].copy()
             if labels.size:  # normalized xywh to pixel xyxy format
                 labels[:, 1:] = xywhn2xyxy(labels[:, 1:], ratio[0] * w, ratio[1] * h, padw=pad[0], padh=pad[1])
-
 
             if self.augment:
                 img, labels, semantic_labels = random_perspective(img, labels, semantic_labels,
@@ -252,11 +291,11 @@ class LoadImagesAndLabelsAndMasks(LoadImagesAndLabels):  # for training/testing
                             scale=hyp['scale'],
                             shear=hyp['shear'],
                             perspective=hyp['perspective'])
-                
+       
         nl = len(labels)  # number of labels
         if nl:
             labels[:, 1:5] = xyxy2xywhn(labels[:, 1:5], w=img.shape[1], h=img.shape[0], clip=True, eps=1e-3)
-
+        
         # TODO: albumentations support
         if self.augment:
             # there are some augmentation that won't change boxes and masks,
@@ -286,7 +325,8 @@ class LoadImagesAndLabelsAndMasks(LoadImagesAndLabels):  # for training/testing
         img = img.transpose((2, 0, 1))[::-1]  # HWC to CHW, BGR to RGB
         img = np.ascontiguousarray(img) # 将一个内存不连续存储的数组转换为内存连续存储的数组 shape (3, 640, 640)
         semantic_labels = np.ascontiguousarray(semantic_labels) # shape: (640, 640))
-        
+
+        assert semantic_labels.shape[-2:] == img.shape[-2:],   f' {semantic_labels.shape}============ {img.shape}'
         return torch.from_numpy(img), labels_out, torch.from_numpy(semantic_labels), self.im_files[index], shapes
 
 
@@ -315,6 +355,7 @@ class LoadImagesAndLabelsAndMasks(LoadImagesAndLabels):  # for training/testing
         for i, index in enumerate(indices):
             # Load image
             img, semantic_labels, _, (h, w) = self.load_mask_image(index)
+
 
             # place img in img4
             if i == 0:  # top left
@@ -364,6 +405,7 @@ class LoadImagesAndLabelsAndMasks(LoadImagesAndLabels):  # for training/testing
 
         # print(torch.unique(torch.tensor(semantic_masks4))) # tensor([ 0, 1], dtype=torch.uint8)
         # print(img4.shape, labels4.shape, semantic_masks4.shape) # (640, 640, 3) (3, 5) (640, 640)
+
         return img4, labels4, semantic_masks4
 
 
@@ -395,6 +437,147 @@ class LoadImagesAndLabelsAndMasks(LoadImagesAndLabels):  # for training/testing
         for i, l in enumerate(label):
             l[:, 0] = i  # add target image index for build_targets()
         return torch.stack(img, 0), torch.cat(label, 0), torch.stack(semantic_masks, 0), path, shapes, 
+
+
+def verify_image_size(im_file):
+    im = Image.open(im_file)
+    im.verify()  # PIL verify
+    shape = exif_size(im)  # image size
+    assert (shape[0] > 9) & (shape[1] > 9), f"image size {shape} <10 pixels"
+    return shape
+
+class OnlyLoadImages_Masks(LoadImagesAndLabelsAndMasks):
+    cache_version = 0.6
+    def __init__(self, path, img_size=640, batch_size=16, augment=False, 
+                 hyp=None, rect=False, image_weights=False, cache_images=False, single_cls=False, 
+                 stride=32, pad=0, min_items=0, prefix="", downsample_ratio=1, overlap=False, rank=-1,  seed=0, 
+                 label_mapping=None, use_bdd100k_5=False, data_mode='det',
+    ):
+        # 对继承自父类的属性进行初始化，并且用父类的初始化方法初始化继承的属性。
+        # super().__init__(path, img_size, batch_size, augment, hyp, rect, 
+        #                  image_weights, cache_images, single_cls, stride, pad, min_items, prefix, rank, seed)
+        self.downsample_ratio = downsample_ratio
+        self.overlap = overlap
+        self.label_mapping = label_mapping 
+        self.use_bdd100k_5 = use_bdd100k_5 
+        
+        self.img_size = img_size
+        self.augment = augment
+        self.hyp = hyp
+        self.image_weights = image_weights
+        self.rect = False if image_weights else rect
+        self.mosaic = self.augment and not self.rect  # load 4 images at a time into a mosaic (only during training)
+        self.mosaic_border = [-img_size // 2, -img_size // 2]
+        self.stride = stride
+        self.path = path
+        self.albumentations = Albumentations() if augment else None
+
+        # load images to self.im_files
+        try:
+            f = []  # image files
+            for p in path if isinstance(path, list) else [path]:
+                p = Path(p)  # os-agnostic
+                if p.is_dir():  # dir
+                    f += glob.glob(str(p / '**' / '*.*'), recursive=True)
+                    # f = list(p.rglob('*.*'))  # pathlib
+                elif p.is_file():  # file
+                    with open(p) as t:
+                        t = t.read().strip().splitlines()
+                        parent = str(p.parent) + os.sep
+                        f += [x.replace('./', parent) if x.startswith('./') else x for x in t]  # local to global path
+                        # f += [p.parent / x.lstrip(os.sep) for x in t]  # local to global path (pathlib)
+                else:
+                    raise Exception(f'{prefix}{p} does not exist')
+            self.im_files = sorted(x.replace('/', os.sep) for x in f if x.split('.')[-1].lower() in IMG_FORMATS)
+            assert self.im_files, f'{prefix}No images found'
+        except Exception as e:
+            raise Exception(f'{prefix}Error loading data from {path}: {e}\nSee {HELP_URL}')
+
+        # get labels path
+        self.labels = []
+        self.data_mode = data_mode
+        if self.data_mode == "det":
+            self.semantic_label_files = None
+            self.detect_label_files = img2label_paths(self.im_files)  # detection labels
+            # load detection labels
+            for lb_file in self.detect_label_files:
+                if os.path.isfile(lb_file):
+                    with open(lb_file) as f:
+                        lb = [x.split() for x in f.read().strip().splitlines() if len(x)]
+                        lb = np.array(lb, dtype=np.float32)
+                    self.labels.append(lb)
+        elif self.data_mode == "seg":
+            self.detect_label_files = None
+            self.semantic_label_files = semantic_img2label_paths(self.im_files)  # semantic labels
+            lb= [[0, 0.5, 0.5, 0.9, 0.9],] #  不能设设置为空，那就图像尺寸得背景 ... 
+            lb = np.array(lb, dtype=np.float32)
+            self.labels = [ lb for i in self.semantic_label_files]
+        else:
+            print("data_mode must be 'seg' or 'det' ....  ")
+
+        n = len(self.im_files)  # number of images  
+        self.shapes = []
+        for im_file in self.im_files:
+            h0, w0 = verify_image_size(im_file)
+    
+            r = self.img_size / max(h0, w0)  # ratio
+            if r != 1: 
+                h0, w0 = int(w0 * r), int(h0 * r)
+            self.shapes.append((h0, w0))
+             
+
+        self.shapes = np.array(self.shapes)
+        # Create indices
+        
+        bi = np.floor(np.arange(n) / batch_size).astype(int)  # batch index
+        nb = bi[-1] + 1  # number of batches
+        self.batch = bi  # batch index of image
+        self.n = n
+        self.indices = range(len(self.im_files))
+
+        if self.rect:
+            # Sort by aspect ratio
+            s = self.shapes  # wh
+            ar = s[:, 1] / s[:, 0]  # aspect ratio
+            irect = ar.argsort()
+            self.shapes = s[irect]  # wh
+            ar = ar[irect]
+
+            # Set training image shapes
+            shapes = [[1, 1]] * nb
+            for i in range(nb):
+                ari = ar[bi == i]
+                mini, maxi = ari.min(), ari.max()
+                if maxi < 1:
+                    shapes[i] = [maxi, 1]
+                elif mini > 1:
+                    shapes[i] = [1, 1 / mini]
+            self.batch_shapes = np.ceil(np.array(shapes) * img_size / stride + pad).astype(int) * stride
+
+        
+
+    def load_mask_image(self, i):
+        path = self.im_files[i]
+        
+        im = cv2.imread(path)  # BGR
+        assert im is not None, f'Image Not Found {path}'
+        h0, w0 = im.shape[:2]  # orig hw
+
+        if self.data_mode == "seg":
+            lpath = self.semantic_label_files[i]
+            semantic_labels = cv2.imread(lpath, 0)  # BGR
+        else:
+            semantic_labels = np.zeros((h0,w0), dtype=np.uint8)
+            semantic_labels[:,-5: ] = 255 # 至少2类，否则 loss 计算报错 ... 
+
+        r = self.img_size / max(h0, w0)  # ratio
+        if r != 1:  # if sizes are not equal
+            im = cv2.resize(im, (int(w0 * r), int(h0 * r)),
+                            interpolation=cv2.INTER_AREA if r < 1 and not self.augment else cv2.INTER_LINEAR)
+            semantic_labels = cv2.resize(semantic_labels, (int(w0 * r), int(h0 * r)), interpolation=cv2.INTER_NEAREST) 
+        semantic_labels = self.convert_label(semantic_labels) 
+        return im, semantic_labels, (h0, w0), im.shape[:2]  # im, hw_original, hw_resized
+    
 
 
 # 统计数据集类别数量
@@ -435,9 +618,11 @@ if __name__ == "__main__":
     import matplotlib.pyplot as plt
     import yaml
 
-    class_names = ["Fallen Trees", "Stone", "broken tracks", "buffalo", "car", "cow", "deer", 
-       "elephant", "flood", "goat", "human", "landslide", "lion", "monkey", "peacock", "tiger", "truck"]
+    class_names = ["Fallen Trees", "Stone", "broken tracks", "car", "cow", "deer", 
+       "elephant", "flood", "goat", "human", "landslide", "lion", "monkey", "peacock", "tiger", "excavator"]
+    # vis_labels = ["broken tracks", "buffalo","flood", "landslide", "lion", "peacock", "truck",] # d=断轨道
     vis_labels = ["truck",] # d=断轨道
+
 
     hyp = "/media/ubuntu/zoro/ubuntu/code/obstacle_detection/data/hyps/hyp.scratch-low.yaml"
     if isinstance(hyp, str):
@@ -445,20 +630,28 @@ if __name__ == "__main__":
             hyp = yaml.safe_load(f)  # load hyps dict
     
     # Dataset只负责数据的抽取，调用一次__getitem__()只返回一个样本。如果希望批处理，还要同时进行shuffle和并行加速等操作，就需要使用DataLoader。
-    # data_path = '/media/ym-004/9AC2F49AC2F47BB7/zoro/data/ObstacleDetection/images/val'
-    # data_path = '/media/ym-004/9AC2F49AC2F47BB7/zoro/data/ObstacleDetection/images/val'
+    # data_path = '/media/ubuntu/zoro/ubuntu/data/railway_obstacle_detection/ObstacleDetection/images/train'
+    # # data_path = '/media/ym-004/9AC2F49AC2F47BB7/zoro/data/ObstacleDetection/images/val'
+    # label_mapping_bdd100k = {0: 0, 215: 1} 
 
+    # data_path = '/media/ubuntu/zoro/ubuntu/data/railway_obstacle_detection/bdd100k/For_OD/images/train'
+    # label_mapping_bdd100k = {0: 0, 255:1, 127:2} 
 
-    data_path = '/media/ubuntu/zoro/ubuntu/data/railway_obstacle_detection/bdd100k/For_OD/images/train'
-    label_mapping_bdd100k = {0: 253, 255:0, 127:1} 
+    data_path = '/media/ubuntu/zoro/ubuntu/data/railway_obstacle_detection/object-13/images/train'
+    label_mapping_bdd100k = {0: 0, 255:1} 
+
     #  label_mapping 必须是连续得
-    train_loader, dataset = create_dataloader(data_path,640, 4, 32, False, hyp, augment=True, \
-                            label_mapping=label_mapping_bdd100k, use_bdd100k_5=True)  # mosica augmentation， for train
+    # train_loader, dataset = create_dataloader(data_path,640, 4, 32, False, hyp, augment=True, \
+    #                         label_mapping=label_mapping_bdd100k, use_bdd100k_5=False, data_mode='det')  # mosica augmentation， for train
     
-    # train_loader, dataset = create_dataloader(data_path,640, 4, 32, False, hyp, rect=True, \
-    #                         label_mapping=label_mapping_bdd100k,use_bdd100k_5=True) # for val
-    # cls_num = get_class(dataset, class_names)
-    # print(cls_num)
+    train_loader, dataset = create_dataloader(data_path, 640, 4, 32, False, hyp, rect=True, rank=-1,
+                                              label_mapping=label_mapping_bdd100k, use_bdd100k_5=False, data_mode='det') # for val
+    
+    # train_loader, dataset = create_dataloader(data_path, 640, 4, 32, False, hyp, rect=True, rank=-1,
+    #                                           label_mapping=label_mapping_bdd100k, use_bdd100k_5=False) # for val
+    cls_num = get_class(dataset, class_names)
+    print(cls_num)
+    input()
 
     # nb = len(train_loader)  # number of batches
     # plt.figure(figsize=(15,10))
@@ -471,40 +664,45 @@ if __name__ == "__main__":
         mask = targets.to('cpu').float() 
         labels_out = labels_out.to('cpu').float().numpy()
 
-        onehot = mask2onehot(mask, 2)
-        
-        print(torch.unique(mask)) # 统计mask类别 ... 
+        # onehot = mask2onehot(mask, 3)
+        # print(torch.unique(mask)) # 统计mask类别 ... 
+        # x = torch.unique(mask)
+        # if len(x) !=2:
+        #     print(paths)
+        # break
         # l = len(torch.unique(torch.tensor(semantic_labels)))
         # if l >3:
         #     print("bug bug ----------------------------", lpath) # 统计mask类别 ... 
-        # """
+        # 
+        # """ 
 # ----------------------------------------------------------------------------------------
-        # img[:,:,:][mask[:,:]==0] = 0
-        # img[:,:,:][mask[:,:]==1] = 1
-        img[:,:,:][onehot[0]==1] = 0
-        img[:,:,:][onehot[1]==1] = 1
-
+        # img[:,:,:][onehot[0]==1] = 0
+        # img[:,:,:][onehot[1]==1] = 1
         img = np.ascontiguousarray(img)  # img为你的图片数组
         h, w, _ = img.shape
-        flag= False
+        flag= True
+        # plt.figure(figsize=(10,10))
 
         for bbox in labels_out: # 遍历每一个obj
-            
             label = class_names[int(bbox[1])]
+            if label not in vis_labels:
+                flag= False
+                continue
+            print(paths)
             # print("----------------", label, "--------------------------")
             # continue
-            flag = True
-            bbox2 = xywhn2xyxy(bbox[2:], w, h)  # normalized xywh to pixel xyxy format
-            p1 = (int(bbox2[0]),int(bbox2[1]))
-            p2 = (int(bbox2[2]),int(bbox2[3]))
-            cv2.rectangle(img, p1, p2, [0,0,255], 2)
+        #     flag = True
+        #     bbox2 = xywhn2xyxy(bbox[2:], w, h)  # normalized xywh to pixel xyxy format
+        #     p1 = (int(bbox2[0]),int(bbox2[1]))
+        #     p2 = (int(bbox2[2]),int(bbox2[3]))
+        #     cv2.rectangle(img, p1, p2, [0,0,255], 2)
 
-        #         wf,hf = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 2)[0]
-        #         cv2.rectangle(img, (p1[0], p1[1]-hf-2), (p1[0]+wf, p1[1]), [0,0,255],-1)
-        #         cv2.putText(img, label, (p1[0], p1[1]), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255,255,255), 1)
-        if flag:
-            plt.imshow(img)
-            plt.show()
+        #     wf,hf = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 2)[0]
+        #     cv2.rectangle(img, (p1[0], p1[1]-hf-2), (p1[0]+wf, p1[1]), [0,0,255],-1)
+        #     cv2.putText(img, label, (p1[0], p1[1]), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255,255,255), 1)
+        # if flag:
+        #     plt.imshow(img)
+        #     plt.show()
         
 
 
