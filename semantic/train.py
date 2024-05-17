@@ -102,7 +102,14 @@ label_mapping_object = {0: 0, 255: 1}
 label_mapping_obstacle = {0: 0, 215: 1} 
 label_mapping_bdd100k = {0: 0, 255:1, 127:2} 
 label_mapping_rs19 = {0: 0, 255: 1}
-label_mapping_coco128 = None
+label_mapping_coco128 = {0: 0, 1: 1, 2: 2, 3: 3, 4: 4, 5: 5, 6: 6, 7: 7, 8: 8, 9: 9, 10: 10, 
+                         12: 11, 14: 12, 15: 13, 16: 14, 17: 15, 18: 16, 21: 17, 22: 18, 23: 19, 
+                         24: 20, 25: 21, 26: 22, 27: 23, 28: 24, 29: 25, 30: 26, 31: 27, 32: 28, 
+                         33: 29, 34: 30, 35: 31, 36: 32, 37: 33, 39: 34, 40: 35, 41: 36, 42: 37, 
+                         43: 38, 44: 39, 45: 40, 46: 41, 47: 42, 49: 43, 50: 44, 51: 45, 52: 46, 
+                         53: 47, 54: 48, 55: 49, 56: 50, 57: 51, 58: 52, 59: 53, 60: 54, 61: 55, 
+                         62: 56, 63: 57, 64: 58, 65: 59, 66: 60, 68: 61, 69: 62, 70: 63, 72: 64, 
+                         73: 65, 74: 66, 75: 67, 76: 68, 77: 69, 78: 70, 80: 71}
 
 
 
@@ -223,6 +230,17 @@ def train(hyp, opt, device, callbacks):
     else:
         model = DetectionSemanticModel(cfg, ch=3, nc=nc, anchors=hyp.get("anchors")).to(device)  # create
     amp = check_amp(model)  # check AMP
+
+    # load detect and segment weights, this part only for ablation
+    if False:
+        det = torch.load('runs/train-seg/object/exp/weights/best.pt')["model"].float().state_dict() 
+        seg = torch.load('runs/train-seg/rs19/raw/weights/last.pt')["model"].float().state_dict() 
+        det_layers = dict((k, v) for k,v in det.items() if '24' not in k)
+        seg_layers = dict((k, v) for k,v in seg.items() if '24' in k)
+        model.load_state_dict(seg_layers, strict=False)
+        model.load_state_dict(det_layers, strict=False)
+
+
 
     # ---------------------- Freeze ----------------------------------------------------------------------------------------------
     freeze = [f"model.{x}." for x in (freeze if len(freeze) > 1 else range(freeze[0]))]  # layers to freeze
