@@ -97,11 +97,11 @@ class SegMaskBase(nn.Module):
     def forward(self, x):
         return self.m(x[0])  
 
-# Multi-scale prediction the fusion 
-class SegMask_L1(nn.Module):
+# Multi-scale prediction then fusion 
+class SegMask_M(nn.Module):
     def __init__(self, n_segcls=2, n=1, c_hid=256, shortcut=False, ch=()): 
-        super(SegMask_L1, self).__init__()
-        sfs = [16, 8]
+        super(SegMask_M, self).__init__()
+        sfs = [8, 8] 
         self.c_out = n_segcls
         self.m = nn.ModuleList(nn.Sequential(C3(c1=c_in, c2=c_hid, n=n, shortcut=shortcut, g=1, e=0.5),
                                C3SPP(c1=c_hid, c2=int(c_hid*1.5), k=(5, 9, 13), g=1, e=0.5),
@@ -116,26 +116,41 @@ class SegMask_L1(nn.Module):
             x[i] = self.m[i](x[i])  # b c h w
         out = torch.mean(torch.stack(x), dim=0)
         return out
-    
 
-# Multi-scale fusion the prediction
-class SegMask_L2(nn.Module):
-    def __init__(self, n_segcls=2, n=1, c_hid=256, shortcut=False, ch=()):  # n是C3的, c_hid是C3的输出通道数
-        super(SegMask_L2, self).__init__()
-
+class SegMask_L1(nn.Module): 
+    def __init__(self, n_segcls=2, n=1, c_hid=256, shortcut=False, sf=8 , ch=()): 
+        super(SegMask_L1, self).__init__()
         self.c_out = n_segcls
         self.cv1 = Conv(ch[0], ch[1])
         self.up = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
-        self.m = nn.Sequential(C3(c1=ch[1]*2, c2=c_hid, n=n, shortcut=shortcut, g=1, e=0.5),
+        self.m = nn.Sequential( C3(c1=ch[1]*2, c2=c_hid, n=n, shortcut=shortcut, g=1, e=0.5),
                                C3SPP(c1=c_hid, c2=int(c_hid*1.5), k=(5, 9, 13), g=1, e=0.5),
                                nn.Dropout(0.1, True),
                                nn.Conv2d(int(c_hid*1.5), self.c_out, kernel_size=(3, 3), stride=(1, 1),
                                          padding=(1, 1), bias=False), 
-                               nn.Upsample(scale_factor=8, mode='bilinear', align_corners=True), )
+                               nn.Upsample(scale_factor=sf, mode='bilinear', align_corners=True), )        
+    def forward(self, x): # p4, p8
+        x = torch.cat([self.cv1(x[0]), self.up(x[1])], dim=1)
+        return self.m(x)  
+
+class SegMask_L2(nn.Module):
+    def __init__(self, n_segcls=2, n=1, c_hid=256, shortcut=False, ch=()): 
+        super(SegMask_L2, self).__init__()
+        sfs = [4, 8]
+        self.c_out = n_segcls
+        self.m = nn.ModuleList(nn.Sequential(C3(c1=c_in, c2=c_hid, n=n, shortcut=shortcut, g=1, e=0.5),
+                               C3SPP(c1=c_hid, c2=int(c_hid*1.5), k=(5, 9, 13), g=1, e=0.5),
+                               nn.Dropout(0.1, True),
+                               nn.Conv2d(int(c_hid*1.5), self.c_out, kernel_size=(3, 3), stride=(1, 1),
+                                         padding=(1, 1), bias=False), 
+                               nn.Upsample(scale_factor=sf, mode='bilinear', align_corners=True), )
+                    for c_in, sf in zip(ch, sfs)) 
               
     def forward(self, x):
-        x = torch.cat([self.up(self.cv1(x[0])), x[1]], dim=1)
-        return self.m(x)  
+        for i in range(len(x)):
+            x[i] = self.m[i](x[i])  # b c h w
+        out = torch.mean(torch.stack(x), dim=0)
+        return out
 
 
 class Detect(nn.Module):
@@ -551,7 +566,7 @@ def parse_model(d, ch):
                 args[1] = [list(range(args[1] * 2))] * len(f)
             if m is Segment:
                 args[3] = make_divisible(args[3] * gw, ch_mul)
-        elif m in [SegMaskBase, SegMask_L1, SegMask_L2]:  # 语义分割头
+        elif m in [SegMaskBase, SegMask_M, SegMask_L1, SegMask_L2]:  # 语义分割头
             args[1] = max(round(args[1] * gd), 1) if args[1] > 1 else args[1]  
             args[2] = make_divisible(args[2] * gw, ch_mul)  
             args.append([ch[x] for x in f])
