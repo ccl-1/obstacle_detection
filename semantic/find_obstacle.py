@@ -5,6 +5,8 @@ import sys
 import cv2
 from shapely.geometry import Polygon, box
 from shapely.affinity import translate
+from shapely.ops import nearest_points
+
 import matplotlib.pyplot as plt
 from pathlib import Path
 import numpy as np
@@ -38,42 +40,22 @@ from utils.general import (
 )
 
 
-def extend_track_region(track_polygon, extension_length):
-    minx, miny, maxx, maxy = track_polygon.bounds
-    extended_region = track_polygon.union(
-        translate(track_polygon, xoff=-extension_length) |
-        translate(track_polygon, xoff=extension_length)
-    )
-    return extended_region
-
-def calculate_danger_level(detections, extended_track_polygon, low_threshold, high_threshold):
+risk_level_dict = {0:'Safe', 1:' Low', 2:' Medium', 3: 'High'}
+def relationship_between_polygon_and_box(polygon, detections):
+    poly = Polygon(polygon)
     danger_levels = []
     for detection in detections:
-        det_dict = {}
-        print(detection[0].size())
-        det_dict['bbox'] = detection[0, :4].cpu().numpy()
-        det_dict['class'] = detection[0, 5].cpu().numpy()
-        print(det_dict['class'])
-
         x1, y1, x2, y2 = detection[0, :4]
-        object_box = box(x1, y1, x2, y2)
-        if extended_track_polygon.intersects(object_box):
-            intersection_area = extended_track_polygon.intersection(object_box).area
-            object_area = object_box.area
-            overlap_ratio = intersection_area / object_area
-
-            if overlap_ratio > high_threshold:
-                danger_level = "High"
-            elif overlap_ratio > low_threshold:
-                danger_level = "Medium"
-            else:
-                danger_level = "Low"
-        else:
-            danger_level = "Low"
-        danger_levels.append({
-            "object": det_dict,
-            "danger_level": danger_level
-        })
+        rect = box(x1, y1, x2, y2)
+        if poly.intersects(rect):
+            danger_level = 3
+            return danger_level
+        else: 
+            nearest_points_poly, nearest_points_rect = nearest_points(poly, rect)
+            distance = nearest_points_poly.distance(nearest_points_rect)
+            print(distance)
+            # TODO  根据距离， 判断 危险等级 .... 
+            danger_level = 1
     return danger_levels
 
 
@@ -168,105 +150,56 @@ def run(
         pred_mask = torch.argmax(pred_mask, dim=0) # torch.Size([640, 640]) 返回指定维度最大值的序号, (c,h,w) -> (h,w)
         segmentation_result = pred_mask.clone().detach().cpu().numpy() # 0 1 2 # (1200, 5760)
         segmentation_result = segmentation_result.astype(np.uint8)
-        # _, segmentation_result = cv2.threshold(segmentation_result, 0, 255, cv2.THRESH_BINARY)
-        
-        # ===============================================================
-        low_risk_th  = 0.1
-        high_risk_th = 0.5
-        extension_length = 50  
-
         
         # Morphological Operations
-        kernel = np.ones((5, 5), np.uint8)
+        kernel = np.ones((10, 10), np.uint8)
         closed_mask = cv2.morphologyEx(segmentation_result, cv2.MORPH_CLOSE, kernel)
         opened_mask = cv2.morphologyEx(closed_mask, cv2.MORPH_OPEN, kernel) # remove noise
-        contours, _ = cv2.findContours(segmentation_result, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        im_rgb = torch.squeeze(im, dim=0).permute(1,2,0).cpu().numpy().copy()
-        cv2.drawContours(im_rgb, contours, -1, (0, 255, 0), 2)
+        contours, _ = cv2.findContours(opened_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        im_vis = torch.squeeze(im, dim=0).permute(1,2,0).cpu().numpy().copy()
 
-        if contours:
-            track_polygon = Polygon([pt[0] for pt in contours[0]])
+        risk_level = 0            
+        if len(contours) > 0 and len(pred) > 0:
+            for contour in contours:
+                epsilon = 0.02 * cv2.arcLength(contour, True)
+                approx = cv2.approxPolyDP(contour, epsilon, True)
+                cv2.drawContours(im_vis, [approx], 0, (255, 0, 0), 3)
+
+                risk_level_object = relationship_between_polygon_and_box(approx.reshape(-1, 2), pred)
+                if risk_level_object == 3:
+                    risk_level = risk_level_object
+                    break
+                else:
+                    risk_level = max(risk_level, risk_level_object)
+            # 
+            for detection in pred:
+                c = int(detection[0, 5])  # integer class
+                conf = float(detection[0, 4])
+                label = f"{names[c]} {conf:.2f}"
+                x1, y1, x2, y2 = detection[0, :4]
+                cv2.rectangle(im_vis, (int(x1), int(y1)), (int(x2), int(y2)), (0, 255, 0), 2)
+                cv2.putText(im_vis, label, (int(x1), int(y1) - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
         else:
-            track_polygon = Polygon()
+            risk_level = 0
         
-        # track_polygon = extend_track_region(track_polygon, extension_length)
-        danger_levels = calculate_danger_level(pred, track_polygon, low_risk_th, high_risk_th)
+        info = "Risk Level: " + risk_level_dict[risk_level]
+        font, font_scale, font_thickness, xx, yy = cv2.FONT_HERSHEY_SIMPLEX, 1, 2, 20, 40
+        (text_w, text_h), _ = cv2.getTextSize(info, font, font_scale, font_thickness)
+        cv2.rectangle(im_vis, (xx-5, yy-text_h-5), (xx+text_w, yy+15), (0, 0, 255), -1)
+        cv2.putText(im_vis, info, (xx, yy), font, font_scale, (255, 255, 255), font_thickness)
+        print("Risk Level: ", risk_level_dict[risk_level])
 
-        for result in danger_levels:
-            obj = result["object"]
-            level = result["danger_level"]
-            print(f"Object {obj['class']} at {obj['bbox']} has danger level: {level}")
-        
         plt.figure()
-        plt.subplot(111)
-        plt.imshow(im_rgb)
+        plt.imshow(im_vis)
+        plt.subplots_adjust(left=0, right=1, top=1, bottom=0)
+        plt.margins(0, 0)
+        plt.axis('off')
         plt.savefig('tmp/t.png')
         plt.show()
-        
-        # # Process predictions
-        # for i, det in enumerate(pred):  # per image
-        #     seen += 1
-        #     if webcam:  # batch_size >= 1
-        #         p, im0, frame = path[i], im0s[i].copy(), dataset.count
-        #         s += f"{i}: "
-        #     else:
-        #         p, im0, frame = path, im0s.copy(), getattr(dataset, "frame", 0)
+    
 
-        #     p = Path(p)  # to Path
-        #     save_path = str(save_dir / p.name)  # im.jpg
-        #     txt_path = str(save_dir / "labels" / p.stem) + ("" if dataset.mode == "image" else f"_{frame}")  # im.txt
-        #     s += "%gx%g " % im.shape[2:]  # print string
-        #     gn = torch.tensor(im0.shape)[[1, 0, 1, 0]]  # normalization gain whwh
-        #     imc = im0.copy() if save_crop else im0  # for save_crop
-        #     annotator = Annotator(im0, line_width=line_thickness, example=str(names))
-
-        #     # Mask plotting  ----------------------------------------------------------------------------
-        #     color_mask = [[0,0,255],[0,255,0]]
-        #     pred_mask = F.interpolate(pred_mask[None], size = im0.shape[:2], mode = 'nearest')
-        #     pred_mask = torch.squeeze(pred_mask) # 1xcxhxw ->  cxhxw
-        #     seg_nc, h, w = pred_mask.shape
-        #     pred_mask = torch.argmax(pred_mask, dim=0) # torch.Size([640, 640]) 返回指定维度最大值的序号, (c,h,w) -> (h,w)
-        #     image_mask = pred_mask.clone().detach().cpu().numpy() # 0 1 2 # (1200, 5760)
-
-        #     with contextlib.suppress(Exception):
-        #         im0[image_mask==1] = im0[image_mask==1] * 0.4 + np.array(color_mask[0]) * 0.6  # lane
-        #         im0[image_mask==2] = im0[image_mask==2] * 0.4 + np.array(color_mask[1]) * 0.6  # drivable
-        #     im0 = np.ascontiguousarray(im0)
-
-        #     if len(det):
-        #         # Rescale boxes from img_size to im0 size
-        #         det[:, :4] = scale_boxes(im.shape[2:], det[:, :4], im0.shape).round()
-
-        #         # Print results
-        #         for c in det[:, 5].unique():
-        #             n = (det[:, 5] == c).sum()  # detections per class
-        #             s += f"{n} {names[int(c)]}{'s' * (n > 1)}, "  # add to string
-
-        #         # Write results
-        #         for *xyxy, conf, cls in reversed(det):
-        #             c = int(cls)  # integer class
-        #             label = names[c] if hide_conf else f"{names[c]}"
-        #             confidence = float(conf)
-        #             confidence_str = f"{confidence:.2f}"
-        #             if save_img or save_crop or view_img:  # Add bbox to image
-        #                 c = int(cls)  # integer class
-        #                 label = None if hide_labels else (names[c] if hide_conf else f"{names[c]} {conf:.2f}")
-        #                 annotator.box_label(xyxy, label, color=colors(c, True))
-        #             if save_crop:
-        #                 save_one_box(xyxy, imc, file=save_dir / "crops" / names[c] / f"{p.stem}.jpg", BGR=True)
-
-        #     # Stream results
-        #     im0 = annotator.result()
-        
-        # plt.figure()
-        # plt.subplot(111)
-        # plt.imshow(im0)
-        # plt.savefig('tmp/t.png')
-        # plt.show()
-
-# TODO 找包围框，有问题，直接用Polygon可能出现的问题，解释出来，因为 障碍物所在区域，肯定Polygon不包含.. 
-# TODO morphologyEx  kernel 设置的大一点 
-# TODO 绘制出， bbox， segmentation mask， 写出分类等级 ... 
+# TODO 根据距离，写出分类等级 ... 
+# 根据 GT, 计算分类精度 ...
 # DDL 6.1 之前完成
 
 
@@ -277,7 +210,11 @@ def parse_opt():
     """
     parser = argparse.ArgumentParser()
     parser.add_argument("--weights", nargs="+", type=str, default="runs/train-seg/obstacle/exp/weights/best.pt", help="model path(s)")
-    parser.add_argument("--source", type=str, default= "/media/ubuntu/zoro/ubuntu/data/railway_obstacle_detection/ObstacleDetection/images/val/a0.jpg", help="file/dir/URL/glob/screen/0(webcam)")
+    parser.add_argument("--source", type=str, default= "/media/ubuntu/zoro/ubuntu/data/\
+railway_obstacle_detection/ObstacleDetection/images/val/a0.jpg",  help="file/dir/URL/glob/screen/0(webcam)")
+#     parser.add_argument("--source", type=str, default= "/media/ubuntu/zoro/ubuntu/data/\
+# railway_obstacle_detection/rs19/images/val/a0.jpg",  help="file/dir/URL/glob/screen/0(webcam)")
+
     parser.add_argument("--data", type=str, default="data/obstacle.yaml", help="dataset.yaml path")
     parser.add_argument("--imgsz", "--img", "--img-size", nargs="+", type=int, default=[640], help="inference size h,w")
     parser.add_argument("--conf-thres", type=float, default=0.25, help="confidence threshold")
