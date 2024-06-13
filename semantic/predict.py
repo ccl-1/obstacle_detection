@@ -243,12 +243,14 @@ def parse_opt():
     output preferences.
     """
     parser = argparse.ArgumentParser()
-    parser.add_argument("--weights", nargs="+", type=str, default="runs/train-seg/bdd100k_det_first/exp/weights/best.pt", help="model path(s)")
-    parser.add_argument("--source", type=str, default= "./data/images/bus.jpg", help="file/dir/URL/glob/screen/0(webcam)")
-    # parser.add_argument("--source", type=str, default= "simulate.mp4", help="file/dir/URL/glob/screen/0(webcam)")
+    # parser.add_argument("--weights", nargs="+", type=str, default="runs/train-seg/head/bdd100k/L1/weights/last.pt", help="model path(s)")
+    # parser.add_argument("--source", type=str, default= "./paper/data/", help="file/dir/URL/glob/screen/0(webcam)")
+    # parser.add_argument("--data", type=str, default="data/bdd100k-seg.yaml", help="dataset.yaml path")
 
-    parser.add_argument("--data", type=str, default="data/bdd100k-seg.yaml", help="dataset.yaml path")
-    
+    parser.add_argument("--weights", nargs="+", type=str, default="runs/train-seg/transfer/RS19+OBJECT-2-ROD/weights/last.pt", help="model path(s)")
+    parser.add_argument("--source", type=str, default= "../../data/railway_obstacle_detection/ObstacleDetection/images/train/c6.jpg", help="file/dir/URL/glob/screen/0(webcam)")
+    parser.add_argument("--data", type=str, default="data/obstacle.yaml", help="dataset.yaml path")
+
     parser.add_argument("--imgsz", "--img", "--img-size", nargs="+", type=int, default=[640], help="inference size h,w")
     parser.add_argument("--conf-thres", type=float, default=0.25, help="confidence threshold")
     parser.add_argument("--iou-thres", type=float, default=0.45, help="NMS IoU threshold")

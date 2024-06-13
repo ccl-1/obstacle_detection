@@ -26,8 +26,8 @@ class ComputeLoss:
         BCEcls = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([h["cls_pw"]], device=device)) #  one single class.
         BCEobj = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([h["obj_pw"]], device=device))
         CEseg = nn.CrossEntropyLoss() # ignore_index=0
-        BCEseg = nn.BCEWithLogitsLoss()
-        self.BCEseg = BCEseg
+        # BCEseg = nn.BCEWithLogitsLoss()
+        # self.BCEseg = BCEseg
         self.CEseg = CEseg
 
 
@@ -132,8 +132,8 @@ class ComputeLoss:
         lbox *= self.hyp["box"] # box: 0.05 
         lobj *= self.hyp["obj"] # obj: 1.0 
         lcls *= self.hyp["cls"] # cls: 0.5 
-        l_seg *= self.hyp["box"]  
-        l_dice *= self.hyp["cls"] 
+        l_seg *= self.hyp["box"]  # 0.05
+        l_dice *= self.hyp["cls"] #0.5
 
         if self.train_mode == 'det_only':
             l_seg *= 0
