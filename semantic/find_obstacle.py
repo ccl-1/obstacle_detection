@@ -191,7 +191,7 @@ def run(
         # with contextlib.suppress(Exception):
         #         im0[segmentation_result==1] = im0[segmentation_result==1] + np.array([0,0,255]) * a
         # im0 = np.ascontiguousarray(im0)
-        # cv2.imwrite(os.path.join('tmp/', file_name+'.png'), im0)
+        # cv2.imwrite(os.path.join('runs/tmp/', file_name+'.png'), im0)
         
         # Morphological Operations
         kernel = np.ones((10, 10), np.uint8)
@@ -224,7 +224,7 @@ def run(
                     break
                 else:
                     risk_level = max(risk_level, risk_level_object)
-            # cv2.imwrite(os.path.join('tmp/', file_name+'_1.png'), im_vis)
+            # cv2.imwrite(os.path.join('runs/tmp/', file_name+'_1.png'), im_vis)
 
         else:
             risk_level = 0

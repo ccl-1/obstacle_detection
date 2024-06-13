@@ -41,7 +41,7 @@ def get_classification_acc(preds, gts, plot_cm=False):
         for first_index in range(len(confusion)):
             for second_index in range(len(confusion[first_index])):
                 plt.text(first_index, second_index, confusion[first_index][second_index])
-        plt.savefig('tmp/cm.png')
+        plt.savefig('runs/tmp/cm.png')
         plt.show()
     return acc, f1, p, r, report
 
@@ -56,8 +56,8 @@ def get_data(GT_path):
     return class_gt
 
 if __name__ == "__main__":
-    gt = get_data("tmp/gt.txt")
-    pred = get_data("tmp/pred.txt")
+    gt = get_data("runs/tmp/gt.txt")
+    pred = get_data("runs/tmp/pred.txt")
     acc, f1, p, r, report = get_classification_acc(pred, gt, plot_cm=True)
     print("Acc:{:.2f},  F1-score:{:.2f},  P:{:.2f},  R:{:.2f}".format(acc, f1, p, r))  
 
