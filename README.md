@@ -4,8 +4,8 @@
 
 ## Dataset
 - **ROD:**
-Railway obstacle intrusion dataset <a href="https://drive.google.com/drive/folders/1ttiMMJQgX8fc-3EUoxsoI0lA1lNHqr8D?usp=sharing" title="ROD">ROD</a>.
-Expanded dataset： <a href="https://drive.google.com/drive/folders/1ttiMMJQgX8fc-3EUoxsoI0lA1lNHqr8D?usp=sharing" title="object-13">object-13</a>. 
+Railway obstacle intrusion dataset <a href="https://drive.google.com/file/d/1MlW7wOsQHt1Mv-eHZ2_8fM318OZQjZNE/view?usp=drive_link" title="ROD">ROD</a>.
+- **Object-13:** Expanded detection dataset <a href="https://drive.google.com/file/d/1O6sYGtWyaq43B3juUqlr13w3mX1jfrwk/view?usp=drive_link" title="object-13">object-13</a>. 
 - **BDD100K:**
 We uses the same  datasets as <a href="https://github.com/hustvl/YOLOP" title="YOLOP">YOLOP</a>.
 
@@ -42,18 +42,18 @@ python semantic/train.py  \
 ```
 
 ## Evaluation
-weights: <a href="https://github.com/hustvl/YOLOP" title="ROD.pt">ROD.pt</a> |
-<a href="https://github.com/hustvl/YOLOP" title="BDD100K.pt">BDD100K.pt</a>
+ROD weights:
+<a href="https://drive.google.com/drive/folders/1Tfg1I35nSeokN3wfXFl_GnGZLgqJWvPX?usp=drive_link" title="ROD-S">link</a>
 
 ``` bash
 python semantic/val.py  \
-    --weights ROD.pt  \
+    --weights ROD-M-transfer.pt  \
     --data ./data/rs19.yaml \
     --label_map obstacle \
 
 # BDD100K
 python semantic/val.py  \
-    --weights BDD100K.pt  \
+    --weights BDD100K-M.pt  \
     --data ./data/bdd100k-seg.yaml \
     --use_bdd100k_5 True \
     --label_map bdd100k 
