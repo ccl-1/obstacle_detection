@@ -9,8 +9,7 @@
 ## Install
 ```python
 git clone https://github.com/ccl-1/obstacle_detection.git  # clone
-cd yolov5
-pip install -r requirements.txt  # install
+cd obstacle_detection
 ```
 ## Dataset
 - **ROD:**
@@ -24,21 +23,46 @@ We recommend the dataset directory structure to be the following:
 │ ├─images
 │ │ ├─train
 │ │ ├─val
-│ ├─det_annotations
+│ ├─labels
 │ │ ├─train
 │ │ ├─val
-│ ├─da_seg_annotations
-│ │ ├─train
-│ │ ├─val
-│ ├─ll_seg_annotations
+│ ├─semantic_labels
 │ │ ├─train
 │ │ ├─val
 ```
 
 ## Training
+``` bash
+# ROD
+python semantic/train.py  \
+    --cfg ./models/semantic/yolov5s-seg.yaml \
+    --data ./data/obstacle.yaml \
+    --batch-size 8 --epochs 150 \
+    --label_map obstacle
+
+# BDD100K
+python semantic/train.py  \
+    --label_map bdd100k \
+    --cfg ./models/semantic/yolov5s-seg-bdd100k.yaml \
+    --data ./data/bdd100k-seg.yaml \
+    --batch-size 4 --epochs 150 \
+    --use_bdd100k_5 True 
+```
 
 ## Evaluation
+``` bash
+python semantic/val.py  \
+    --weights rod.pt  \
+    --data ./data/rs19.yaml \
+    --label_map obstacle \
 
+# BDD100K
+python semantic/val.py  \
+    --weights BDD100K.pt  \
+    --data ./data/bdd100k-seg.yaml \
+    --use_bdd100k_5 True \
+    --label_map bdd100k 
+```
 ## Visualization
 
 ![](paper/Doc/2.png)
