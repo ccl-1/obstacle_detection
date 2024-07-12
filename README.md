@@ -8,7 +8,7 @@
 
 ## Install
 ```python
-git clone https://github.com/ultralytics/yolov5  # clone
+git clone https://github.com/ccl-1/obstacle_detection.git  # clone
 cd yolov5
 pip install -r requirements.txt  # install
 ```
