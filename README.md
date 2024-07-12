@@ -42,9 +42,12 @@ python semantic/train.py  \
 ```
 
 ## Evaluation
+weights: <a href="https://github.com/hustvl/YOLOP" title="ROD.pt">ROD.pt</a> |
+<a href="https://github.com/hustvl/YOLOP" title="BDD100K.pt">BDD100K.pt</a>
+
 ``` bash
 python semantic/val.py  \
-    --weights rod.pt  \
+    --weights ROD.pt  \
     --data ./data/rs19.yaml \
     --label_map obstacle \
 
