@@ -1,7 +1,7 @@
 # Real-Time Multi-Task Perception Model for Railway Obstacle Detection 
 ## The Overview of MTP-Rail
 
-<img src="paper/Doc/1.png" width="600px">
+<img src="paper/Doc/1.png" width="800px">
 
 
 ## Requirement
@@ -33,4 +33,5 @@ We recommend the dataset directory structure to be the following:
 ## Evaluation
 
 ## Visualization
-<img src="paper/Doc/2.png" width="600px">
+
+![](paper/Doc/2.png)
