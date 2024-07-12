@@ -1,16 +1,7 @@
 # Real-Time Multi-Task Perception Model for Railway Obstacle Detection 
 ## The Overview of MTP-Rail
-
 <img src="paper/Doc/1.png" width="800px">
 
-
-## Requirement
-
-## Install
-```python
-git clone https://github.com/ccl-1/obstacle_detection.git  # clone
-cd obstacle_detection
-```
 ## Dataset
 - **ROD:**
 Railway obstacle intrusion dataset. Dowload.
