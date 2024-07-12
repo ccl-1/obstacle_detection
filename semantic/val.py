@@ -275,7 +275,7 @@ def run(
     if not training:
         if not single_cls:  # check --weights are trained on --data
             ncm = model.model.nc
-            print("============\n", ncm, nc)
+            # print("============\n", ncm, nc)
             assert ncm == nc, (
                 f"{weights} ({ncm} classes) trained on different --data than what you passed ({nc} "
                 f"classes). Pass correct combination of --weights and --data that are trained together."

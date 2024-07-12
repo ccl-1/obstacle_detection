@@ -205,15 +205,16 @@ def run(
         if len(contours) > 0:
             for cnt in contours:
                 area = cv2.contourArea(cnt)  
-                print(area)
                 if area > 2000:
                     contours_filtered.append(cnt)
-
-        if len(contours) > 0 and len(pred) > 0 and pred[0].shape[0] > 0:
+        if len(contours_filtered) > 0 and len(pred) > 0 and pred[0].shape[0] > 0:
+            print(len(contours_filtered))
             for contour in contours_filtered:
-                epsilon = 0.02 * cv2.arcLength(contour, True)
-                approx = cv2.approxPolyDP(contour, epsilon, True)
+                print(cv2.contourArea(contour))
+                epsilon = 0.02 * cv2.arcLength(contour, False)
+                approx = cv2.approxPolyDP(contour, epsilon, False)
                 cv2.drawContours(im_vis, [approx], 0, (0, 0, 255), 3)
+                
                 zeros = np.zeros((im_vis.shape), dtype=np.uint8)
                 mask = cv2.fillPoly(zeros, [approx], color=(0, 0, 255))
                 im_vis = a * mask + im_vis

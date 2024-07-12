@@ -153,6 +153,7 @@ class SegMask_L2(nn.Module):
         return out
 
 
+
 class Detect(nn.Module):
     # YOLOv5 Detect head for detection models
     stride = None  # strides computed during build

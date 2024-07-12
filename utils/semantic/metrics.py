@@ -107,8 +107,7 @@ class Metric:
         Return:
             float.
         """
-        return self.all_ap.mean() if len(self.all_ap) else 0.0
-        # return self.all_ap[:, 0].mean() if len(self.all_ap) else 0.0
+        return self.all_ap[:, 0].mean() if len(self.all_ap) else 0.0
 
     @property
     def map(self):

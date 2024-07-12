@@ -243,13 +243,13 @@ def parse_opt():
     output preferences.
     """
     parser = argparse.ArgumentParser()
-    # parser.add_argument("--weights", nargs="+", type=str, default="runs/train-seg/head/bdd100k/L1/weights/last.pt", help="model path(s)")
-    # parser.add_argument("--source", type=str, default= "./paper/data/", help="file/dir/URL/glob/screen/0(webcam)")
-    # parser.add_argument("--data", type=str, default="data/bdd100k-seg.yaml", help="dataset.yaml path")
+    parser.add_argument("--weights", nargs="+", type=str, default="runs/train-seg/head/bdd100k/L1/weights/last.pt", help="model path(s)")
+    parser.add_argument("--source", type=str, default= "runs/DriverAnalysisDemo_3_HD.mp4", help="file/dir/URL/glob/screen/0(webcam)")
+    parser.add_argument("--data", type=str, default="data/yolov5s-seg-bdd100k-L1.yaml", help="dataset.yaml path")
 
-    parser.add_argument("--weights", nargs="+", type=str, default="runs/train-seg/transfer/RS19+OBJECT-2-ROD/weights/last.pt", help="model path(s)")
-    parser.add_argument("--source", type=str, default= "../../data/railway_obstacle_detection/ObstacleDetection/images/train/c6.jpg", help="file/dir/URL/glob/screen/0(webcam)")
-    parser.add_argument("--data", type=str, default="data/obstacle.yaml", help="dataset.yaml path")
+    # parser.add_argument("--weights", nargs="+", type=str, default="runs/train-seg/transfer/RS19+OBJECT-2-ROD/weights/last.pt", help="model path(s)")
+    # parser.add_argument("--source", type=str, default= "../../data/railway_obstacle_detection/ObstacleDetection/images/train/c6.jpg", help="file/dir/URL/glob/screen/0(webcam)")
+    # parser.add_argument("--data", type=str, default="data/obstacle.yaml", help="dataset.yaml path")
 
     parser.add_argument("--imgsz", "--img", "--img-size", nargs="+", type=int, default=[640], help="inference size h,w")
     parser.add_argument("--conf-thres", type=float, default=0.25, help="confidence threshold")
@@ -291,3 +291,38 @@ def main(opt):
 if __name__ == "__main__":
     opt = parse_opt()
     main(opt)
+
+# 34 - 36 从左到右行驶的白色车辆
+# 259 - 263 横穿马路的多个行人
+# 391 - 421 右侧加塞车辆
+# 505 - 568 施工标志牌
+# 635 - 638 横穿马路的行人
+# 663 - 668 横穿马路的行人
+
+f1, f2, f3, f4, f5, f6 = [34, 36], [259, 263], [391, 421], [505, 568], [635, 638], [663, 668]
+cls_f = ['car', 'person', 'car',  'sign', 'person', 'person']
+fid = 1
+if (fid >= f1[0]) and (fid <= f1[1]):
+    pass
+    # 从左到右行驶的白色车辆，不显示
+
+if (fid >= f2[0]) and (fid <= f2[1]):
+    pass
+    # 横穿马路的多个行人
+
+if (fid >= f3[0]) and (fid <= f3[1]):
+    pass
+    # 右侧加塞车辆
+
+if (fid >= f4[0]) and (fid <= f4[1]):
+    # 施工标志牌, 不显示
+    pass
+
+if (fid >= f5[0]) and (fid <= f5[1]):
+    # 找到横穿马路的行人id坐标，不显示
+    pass
+
+if (fid >= f6[0]) and (fid <= f6[1]):
+    pass
+    # 找到横穿马路的行人id坐标，不显示
+
